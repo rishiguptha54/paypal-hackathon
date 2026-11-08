@@ -1,0 +1,13 @@
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+.vite/
+
+# secrets: never commit real env files
+.env
+.env.*
+!.env.example
+
+*.log
+.DS_Store

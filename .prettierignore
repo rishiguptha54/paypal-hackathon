@@ -1,0 +1,10 @@
+node_modules
+dist
+coverage
+package-lock.json
+apps/api/migrations
+spec
+prompts
+*.html
+*.pptx
+paypal-ai-hackathon-blueprint.md
