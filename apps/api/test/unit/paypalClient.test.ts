@@ -81,13 +81,38 @@ describe('adapters/paypal REST', () => {
     expect(ids).toEqual(['cap-req-1', 'cap-req-1']);
   });
 
-  it('never calls PATCH', async () => {
+  it('does not PATCH the direct REST create/capture flow', async () => {
     const fake = new FakePayPal();
     const c = client(fake);
     const { data } = await c.createOrder(input, input.requestId);
     await c.getOrder(data.id);
     await c.captureOrder(data.id, 'r');
     expect(fake.calls.some((x) => x.method === 'PATCH')).toBe(false);
+  });
+
+  it('binds MCP-created IDs only while CREATED, and verifies custom_id and invoice_id', async () => {
+    const fake = new FakePayPal();
+    const orderId = 'MCPORDER000000001';
+    fake.orders.set(orderId, { total: '298.00', status: 'CREATED' });
+    const c = client(fake);
+    await c.bindOrder(orderId, input.purchaseId, input.requestId);
+    expect(fake.callsTo('PATCH', '/orders/')[0]?.body).toEqual([
+      {
+        op: 'add',
+        path: "/purchase_units/@reference_id=='default'/custom_id",
+        value: input.purchaseId,
+      },
+      {
+        op: 'add',
+        path: "/purchase_units/@reference_id=='default'/invoice_id",
+        value: input.purchaseId,
+      },
+    ]);
+    fake.approve(orderId);
+    await expect(c.bindOrder(orderId, input.purchaseId, input.requestId)).rejects.toBeInstanceOf(
+      UpstreamError,
+    );
+    expect(fake.callsTo('PATCH', '/orders/')).toHaveLength(1);
   });
 
   it('rejects responses that fail Zod validation', async () => {

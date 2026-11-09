@@ -1,0 +1,97 @@
+@baseUrl = http://localhost:3000/api
+
+### Public configuration and active fixture merchant presets
+GET {{baseUrl}}/config
+
+### Create a mandate from explicit purchase intent
+# @name createMandate
+POST {{baseUrl}}/mandates
+Content-Type: application/json
+
+{
+  "requestText": "Buy 1 ergonomic desk chair for max $120 from northstar-office.example"
+}
+
+### Confirm the mandate (server converts decimal money to minor units)
+# @name confirmMandate
+POST {{baseUrl}}/mandates/{{createMandate.response.body.id}}/confirm
+Content-Type: application/json
+
+{
+  "productQuery": "ergonomic desk chair",
+  "quantity": 1,
+  "maxTotal": "120.00",
+  "currency": "USD",
+  "allowedMerchantDomains": ["northstar-office.example"],
+  "recurringAllowed": false,
+  "excludedTerms": []
+}
+
+### Search the configured fixture catalog and inspect deterministic policy findings
+# @name searchOffers
+POST {{baseUrl}}/mandates/{{createMandate.response.body.id}}/search
+Content-Type: application/json
+
+{}
+
+### Create a purchase from a returned ALLOWED offer; the server computes total and hash
+# @name createPurchase
+POST {{baseUrl}}/purchases
+Content-Type: application/json
+
+{
+  "mandateId": "{{createMandate.response.body.id}}",
+  "offerSnapshotId": "{{searchOffers.response.body.offers[0].snapshotId}}"
+}
+
+### Approve only after showing the exact server-generated mandate hash to the user
+# @name approvePurchase
+POST {{baseUrl}}/purchases/{{createPurchase.response.body.id}}/approve
+Content-Type: application/json
+
+{
+  "mandateHash": "{{createPurchase.response.body.mandateHash}}"
+}
+
+### Retrieve the approved purchase
+GET {{baseUrl}}/purchases/{{createPurchase.response.body.id}}
+
+### Create the Sandbox order (MCP, or explicit REST fallback)
+# @name createOrder
+POST {{baseUrl}}/purchases/{{createPurchase.response.body.id}}/paypal/create-order
+Content-Type: application/json
+
+{}
+
+### Safe drift demo (DEMO_CONTROLS_ENABLED=true; do not run the cancel below first)
+POST {{baseUrl}}/purchases/{{createPurchase.response.body.id}}/simulate-drift
+Content-Type: application/json
+
+{"kind":"PRICE_HIKE"}
+
+### After buyer approval in Sandbox, the gate must return 409 DRIFT_AMOUNT_MISMATCH
+POST {{baseUrl}}/purchases/{{createPurchase.response.body.id}}/paypal/capture
+Content-Type: application/json
+
+{"paypalOrderId":"{{createOrder.response.body.paypalOrderId}}"}
+
+### The receipt includes DRIFT_SIMULATED, CAPTURE_BLOCKED and MCP trace summaries
+GET {{baseUrl}}/purchases/{{createPurchase.response.body.id}}/receipt
+
+### The exit check is INTACT with a non-zero checked count
+GET {{baseUrl}}/audit/verify
+
+### Load sample history without PayPal calls (201 first, 200 on repeat)
+POST {{baseUrl}}/demo/seed
+Content-Type: application/json
+
+{}
+
+### Inspect the sample ledger (optional decision/state filters)
+GET {{baseUrl}}/audit?limit=50&seeded=true
+
+### Alternative: cancel an uncompleted purchase, before running capture/drift
+POST {{baseUrl}}/purchases/{{createPurchase.response.body.id}}/cancel
+Content-Type: application/json
+
+{}

@@ -5,6 +5,11 @@ import { ConfigError, loadConfig } from './config';
 import { createLogger } from './logger';
 import { WEB_DIST_DIR } from './paths';
 import { createPgDb } from './repo/db';
+import { RuleBasedParser } from './adapters/intentParser/ruleBasedParser';
+import { GeminiIntentParser } from './adapters/intentParser/geminiParser';
+import { FixtureCatalogProvider } from './adapters/catalog/fixtureCatalogProvider';
+import { Channel3CatalogProvider } from './adapters/catalog/channel3CatalogProvider';
+import { CatalogService } from './adapters/catalog/catalogService';
 
 async function main() {
   const logger = createLogger();
@@ -32,9 +37,33 @@ async function main() {
     launch: defaultMcpLaunch(config.paypal.mcpCommand),
     logger,
   });
+  const parser =
+    config.aiProvider === 'gemini'
+      ? new GeminiIntentParser({
+          apiKey: requireAiApiKey(config.aiApiKey),
+          model: config.aiModel,
+          logger,
+        })
+      : new RuleBasedParser();
+  const fixtures = new FixtureCatalogProvider();
+  const channel3 = new Channel3CatalogProvider({ apiKey: config.channel3ApiKey });
+  const catalog = new CatalogService(
+    config.productSource === 'channel3' ? channel3 : fixtures,
+    fixtures,
+    logger,
+  );
   await gateway.start();
 
-  const app = createApp({ config, db, logger, rest, gateway, webDistDir: WEB_DIST_DIR });
+  const app = createApp({
+    config,
+    db,
+    logger,
+    rest,
+    gateway,
+    parser,
+    catalog,
+    webDistDir: WEB_DIST_DIR,
+  });
   const server = app.listen(config.port, () => {
     logger.info({ port: config.port, env: config.paypal.env }, 'IntentLock API listening');
   });
@@ -54,3 +83,8 @@ async function main() {
 }
 
 void main();
+
+function requireAiApiKey(value: string | undefined): string {
+  if (!value) throw new Error('AI_API_KEY is required when AI_PROVIDER=gemini.');
+  return value;
+}

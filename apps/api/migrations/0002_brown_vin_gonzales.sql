@@ -1,0 +1,2 @@
+ALTER TABLE "mandates" DROP CONSTRAINT "mandates_confirmed_fields_check";--> statement-breakpoint
+ALTER TABLE "mandates" ADD CONSTRAINT "mandates_confirmed_fields_check" CHECK ("mandates"."status" <> 'CONFIRMED' OR ("mandates"."quantity" IS NOT NULL AND "mandates"."max_total_minor" IS NOT NULL AND "mandates"."currency" = 'USD' AND cardinality("mandates"."allowed_merchant_domains") BETWEEN 1 AND 20));

@@ -1,6 +1,11 @@
 import { z } from 'zod';
 
 const AmountSchema = z.object({ currency_code: z.string(), value: z.string() });
+const CaptureSchema = z.object({
+  id: z.string().min(1),
+  status: z.string().min(1),
+  amount: AmountSchema.optional(),
+});
 
 /** OAuth2 token response. */
 export const TokenResponseSchema = z.object({
@@ -29,13 +34,12 @@ export const PayPalOrderSchema = z.object({
         invoice_id: z.string().optional(),
         amount: AmountSchema,
         payee: z.object({ merchant_id: z.string().optional() }).optional(),
+        payments: z.object({ captures: z.array(CaptureSchema).optional() }).optional(),
       }),
     )
     .min(1),
 });
 export type PayPalOrder = z.infer<typeof PayPalOrderSchema>;
-
-const CaptureSchema = z.object({ id: z.string().min(1), status: z.string().min(1) });
 
 export const CaptureResponseSchema = z.object({
   id: z.string().min(1),

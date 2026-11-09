@@ -1,17 +1,18 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { eq } from 'drizzle-orm';
 import request from 'supertest';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Express } from 'express';
-import { PayPalMcpGateway } from '../../src/adapters/paypalMcp/gateway';
-import { createLogger } from '../../src/logger';
+import type { PayPalMcpGateway } from '../../src/adapters/paypalMcp/gateway';
 import { paymentOperations, purchases } from '../../src/repo/schema';
 import { buildTestApp } from '../helpers/app';
+import { approvedPurchase } from '../helpers/flow';
+import { stubGateway } from '../helpers/stubGateway';
+import { UpstreamError } from '../../src/errors';
+import { restOnlyGateway } from '../helpers/app';
 
-const STUB = fileURLToPath(new URL('../fixtures/stubMcpServer.mjs', import.meta.url));
 const closers: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
   await Promise.all(closers.splice(0).map((c) => c()));
@@ -38,26 +39,19 @@ function client(a: Express) {
 }
 
 async function newPurchase(c: ReturnType<typeof client>) {
-  const res = await c.post('/api/dev/purchases');
-  expect(res.status).toBe(201);
-  return res.body as { id: string };
+  return approvedPurchase(c);
 }
 
-describe('temporary purchase route', () => {
-  it('creates a server-priced $1.00 APPROVED purchase', async () => {
+describe('retired temporary purchase route', () => {
+  it('does not expose the auto-approval shortcut', async () => {
     const { app: a } = await app();
     const res = await client(a).post('/api/dev/purchases');
-    expect(res.status).toBe(201);
-    expect(res.body).toMatchObject({
-      state: 'APPROVED',
-      quantity: 1,
-      total: { minor: '100', currency: 'USD', display: '$1.00' },
-    });
+    expect(res.status).toBe(404);
   });
 
   it('rejects client-sent amounts', async () => {
     const { app: a } = await app();
-    const res = await client(a).post('/api/dev/purchases', { total: '500.00', totalMinor: 50000 });
+    const res = await client(a).post('/api/purchases', { total: '500.00', totalMinor: 50000 });
     expect(res.status).toBe(400);
     expect(res.body.error.code).toBe('UNEXPECTED_FIELD');
   });
@@ -79,7 +73,7 @@ describe('create-order (route 10)', () => {
     const unit = (
       call?.body as { purchase_units: { amount: { value: string }; custom_id: string }[] }
     ).purchase_units[0];
-    expect(unit?.amount.value).toBe('1.00');
+    expect(unit?.amount.value).toBe('89.00');
     expect(unit?.custom_id).toBe(p.id);
 
     const ops = await db.select().from(paymentOperations);
@@ -203,7 +197,7 @@ describe('capture (route 11)', () => {
     });
     expect(res.status).toBe(409);
     expect(res.body.error.code).toBe('CAPTURE_BLOCKED');
-    expect(res.body.error.details).toContainEqual({ code: 'ORDER_ID_MISMATCH' });
+    expect(res.body.error.details).toContainEqual({ code: 'ORDER_MISMATCH' });
     expect(ctx.fake.callsTo('POST', '/capture')).toHaveLength(0);
   });
 
@@ -227,10 +221,10 @@ describe('capture (route 11)', () => {
     const res = await c.post(`/api/purchases/${p.id}/paypal/capture`, {
       paypalOrderId: body.paypalOrderId,
     });
-    expect(res.body.error.details).toContainEqual({ code: 'ORDER_NOT_APPROVED' });
+    expect(res.body.error.details).toContainEqual({ code: 'PAYPAL_NOT_APPROVED' });
   });
 
-  it('fails closed with 502 when the live order cannot be read', async () => {
+  it('fails closed with 504 when neither live order read works', async () => {
     const ctx = await app();
     const { c, id, orderId } = await ready(ctx);
     ctx.fake.intercept = (url, init) =>
@@ -238,7 +232,7 @@ describe('capture (route 11)', () => {
         ? new Response('{}', { status: 503 })
         : undefined;
     const res = await c.post(`/api/purchases/${id}/paypal/capture`, { paypalOrderId: orderId });
-    expect(res.status).toBe(502);
+    expect(res.status).toBe(504);
     expect(ctx.fake.callsTo('POST', '/capture')).toHaveLength(0);
     const [row] = await ctx.db.select().from(purchases).where(eq(purchases.id, id));
     expect(row?.state).toBe('ORDER_CREATED');
@@ -301,20 +295,17 @@ describe('capture (route 11)', () => {
 describe('end to end with the real gateway and the stub MCP server (G0 shape)', () => {
   it('MCP create_order -> approve -> MCP get_order -> REST capture -> CAPTURED', async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'il-e2e-'));
+    const ordersFile = path.join(dir, 'orders.json');
+    closers.push(async () => rmSync(dir, { recursive: true, force: true }));
     const ctx = await app({
-      gateway: (rest) =>
-        new PayPalMcpGateway({
-          rest,
-          launch: { command: process.execPath, args: [STUB] },
-          logger: createLogger({ level: 'silent' }),
-          extraEnv: { STUB_LOG: path.join(dir, 'log') },
-        }),
+      gateway: (rest, fake) =>
+        stubGateway(rest, fake, ordersFile, { STUB_LOG: path.join(dir, 'log') }),
     });
     await (ctx.gateway as PayPalMcpGateway).start();
     const health = await request(ctx.app).get('/api/health');
     expect(health.body).toEqual({
       status: 'ok',
-      checks: { db: 'ok', paypal: 'ok', paypalMcp: 'ok' },
+      checks: { db: 'ok', paypal: 'ok', paypalMcp: 'ok', catalog: 'ok', ai: 'ok' },
     });
 
     const c = client(ctx.app);
@@ -324,20 +315,122 @@ describe('end to end with the real gateway and the stub MCP server (G0 shape)', 
     expect(created.body.paypalOrderId).toMatch(/^STUBORDER/);
     expect(ctx.fake.callsTo('POST', '/v2/checkout/orders')).toHaveLength(0);
 
-    // The stub's created order is registered with PayPal's fake so REST capture can find it.
-    ctx.fake.orders.set(created.body.paypalOrderId, { total: '1.00', status: 'APPROVED' });
+    ctx.fake.approve(created.body.paypalOrderId);
     const cap = await c.post(`/api/purchases/${p.id}/paypal/capture`, {
       paypalOrderId: created.body.paypalOrderId,
     });
     expect(cap.status).toBe(200);
     expect(cap.body).toMatchObject({ state: 'CAPTURED', paypalStatus: 'COMPLETED' });
-    expect(ctx.fake.callsTo('GET', '/v2/checkout/orders/')).toHaveLength(0);
+    expect(ctx.fake.callsTo('PATCH', '/v2/checkout/orders/')).toHaveLength(1);
+    expect(ctx.fake.orders.get(created.body.paypalOrderId)).toMatchObject({
+      customId: p.id,
+      invoiceId: p.id,
+      status: 'COMPLETED',
+    });
+    const calls = readFileSync(path.join(dir, 'log'), 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as { name?: string; args?: unknown });
+    expect(calls.find((call) => call.name === 'create_order')?.args).toEqual({
+      currencyCode: 'USD',
+      items: [{ name: 'Ergonomic desk chair', quantity: 1, itemCost: 89, itemTotal: 89 }],
+    });
+    const receipt = await c.get(`/api/purchases/${p.id}/receipt`);
+    expect(receipt.body.chain).toBe('INTACT');
+    expect(receipt.body.mcpTrace.map((trace: { tool: string }) => trace.tool)).toEqual([
+      'create_order',
+      'get_order',
+    ]);
 
     const ops = await ctx.db.select().from(paymentOperations);
     expect(ops.find((o) => o.kind === 'CREATE_ORDER')).toMatchObject({
       channel: 'mcp',
       mcpTool: 'create_order',
     });
-    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('INT-21 falls back from a malformed MCP read to REST, and fails closed if REST also fails', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'il-fallback-'));
+    closers.push(async () => rmSync(dir, { recursive: true, force: true }));
+    const ctx = await app({
+      gateway: (rest, fake) =>
+        stubGateway(rest, fake, path.join(dir, 'orders.json'), { STUB_GET_MODE: 'malformed' }),
+    });
+    const c = client(ctx.app);
+    const first = await newPurchase(c);
+    const created = await c.post(`/api/purchases/${first.id}/paypal/create-order`);
+    expect(created.status).toBe(200);
+    ctx.fake.approve(created.body.paypalOrderId);
+    const captured = await c.post(`/api/purchases/${first.id}/paypal/capture`, {
+      paypalOrderId: created.body.paypalOrderId,
+    });
+    expect(captured.body.state).toBe('CAPTURED');
+    const receipt = await c.get(`/api/purchases/${first.id}/receipt`);
+    expect(receipt.body.mcpTrace.at(-1)).toMatchObject({
+      tool: 'get_order',
+      status: 'ERROR',
+      fallbackToRest: true,
+    });
+
+    const second = await newPurchase(c);
+    const another = await c.post(`/api/purchases/${second.id}/paypal/create-order`);
+    expect(another.status).toBe(200);
+    const calls = ctx.fake.callsTo('POST', '/capture').length;
+    ctx.fake.intercept = (url, init) =>
+      init?.method === 'GET' && url.includes('/v2/checkout/orders/')
+        ? new Response('{}', { status: 503 })
+        : undefined;
+    const failed = await c.post(`/api/purchases/${second.id}/paypal/capture`, {
+      paypalOrderId: another.body.paypalOrderId,
+    });
+    expect(failed.status).toBe(504);
+    expect(ctx.fake.callsTo('POST', '/capture')).toHaveLength(calls);
+    const [row] = await ctx.db.select().from(purchases).where(eq(purchases.id, second.id));
+    expect(row?.state).toBe('ORDER_CREATED');
+  });
+
+  it('never retries an MCP create whose outcome is unknown', async () => {
+    let calls = 0;
+    const ctx = await app({
+      gateway: (rest) => ({
+        ...restOnlyGateway(rest),
+        createOrder: async () => {
+          calls += 1;
+          throw new UpstreamError('paypal_mcp', 'timeout', 'Unknown create outcome');
+        },
+      }),
+    });
+    const c = client(ctx.app);
+    const p = await newPurchase(c);
+    expect((await c.post(`/api/purchases/${p.id}/paypal/create-order`)).status).toBe(504);
+    expect((await c.post(`/api/purchases/${p.id}/paypal/create-order`)).status).toBe(409);
+    expect(calls).toBe(1);
+    const receipt = await c.get(`/api/purchases/${p.id}/receipt`);
+    expect(receipt.body.mcpTrace).toHaveLength(1);
+    expect(receipt.body.mcpTrace[0]).toMatchObject({ status: 'TIMEOUT', fallbackToRest: false });
+  });
+
+  it('retries binding a known MCP order without creating a second order', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'il-binding-'));
+    closers.push(async () => rmSync(dir, { recursive: true, force: true }));
+    const ctx = await app({
+      gateway: (rest, fake) =>
+        stubGateway(rest, fake, path.join(dir, 'orders.json'), {
+          STUB_LOG: path.join(dir, 'calls.log'),
+        }),
+    });
+    const c = client(ctx.app);
+    const p = await newPurchase(c);
+    ctx.fake.intercept = (_url, init) =>
+      init?.method === 'PATCH' ? new Response('{}', { status: 503 }) : undefined;
+    expect((await c.post(`/api/purchases/${p.id}/paypal/create-order`)).status).toBe(502);
+    ctx.fake.intercept = undefined;
+    expect((await c.post(`/api/purchases/${p.id}/paypal/create-order`)).status).toBe(200);
+    const calls = readFileSync(path.join(dir, 'calls.log'), 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as { name?: string });
+    expect(calls.filter((call) => call.name === 'create_order')).toHaveLength(1);
+    expect(ctx.fake.orders.size).toBe(1);
   });
 });

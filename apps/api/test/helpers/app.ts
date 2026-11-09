@@ -5,6 +5,11 @@ import { loadConfig } from '../../src/config';
 import { createLogger } from '../../src/logger';
 import { createTestDb } from './db';
 import { FakePayPal } from './fakePaypal';
+import { RuleBasedParser } from '../../src/adapters/intentParser/ruleBasedParser';
+import type { IntentParser } from '../../src/adapters/intentParser/types';
+import { FixtureCatalogProvider } from '../../src/adapters/catalog/fixtureCatalogProvider';
+import { CatalogService } from '../../src/adapters/catalog/catalogService';
+import type { StudioGenerator } from '../../src/adapters/studio/gemini';
 
 export const TEST_ENV = {
   NODE_ENV: 'test',
@@ -17,8 +22,11 @@ export const TEST_ENV = {
 
 export async function buildTestApp(
   opts: {
-    gateway?: (rest: PayPalRestClient) => PayPalOrderGateway;
+    gateway?: (rest: PayPalRestClient, fake: FakePayPal) => PayPalOrderGateway;
     env?: Record<string, string>;
+    parser?: IntentParser;
+    studioGenerator?: StudioGenerator;
+    webDistDir?: string;
   } = {},
 ) {
   const { db, close } = await createTestDb();
@@ -29,9 +37,23 @@ export async function buildTestApp(
     clientSecret: config.paypal.clientSecret,
     fetch: fake.fetch,
   });
-  const gateway = (opts.gateway ?? restOnlyGateway)(rest);
-  const app = createApp({ config, db, logger: createLogger({ level: 'silent' }), rest, gateway });
-  return { app, db, fake, rest, gateway, config, close };
+  const gateway = (opts.gateway ?? restOnlyGateway)(rest, fake);
+  const logger = createLogger({ level: 'silent' });
+  const fixtures = new FixtureCatalogProvider();
+  const catalog = new CatalogService(fixtures, fixtures, logger);
+  const parser = opts.parser ?? new RuleBasedParser();
+  const app = createApp({
+    config,
+    db,
+    logger,
+    rest,
+    gateway,
+    parser,
+    catalog,
+    studioGenerator: opts.studioGenerator,
+    webDistDir: opts.webDistDir,
+  });
+  return { app, db, fake, rest, gateway, config, parser, close };
 }
 
 /** Gateway double that serves create/read from the REST fake and reports MCP as down. */

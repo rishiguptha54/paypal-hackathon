@@ -6,11 +6,20 @@ export interface FakeCall {
 }
 
 export type CaptureMode = 'COMPLETED' | 'PENDING' | 'DECLINE' | 'TIMEOUT' | 'ERROR_500';
+export interface FakeOrder {
+  total: string;
+  status: string;
+  customId?: string;
+  invoiceId?: string;
+  captures?: { id: string; status: string; amount: { currency_code: string; value: string } }[];
+}
 
 /** Minimal PayPal Sandbox double behind a fetch-compatible function. */
 export class FakePayPal {
   calls: FakeCall[] = [];
-  orders = new Map<string, { total: string; status: string }>();
+  orders = new Map<string, FakeOrder>();
+  onOrderChange?: () => void;
+  beforeCapture?: () => Promise<void>;
   captureMode: CaptureMode = 'COMPLETED';
   /** Overrides the amount GET /orders reports (simulates drift at PayPal). */
   liveAmountOverride?: string;
@@ -41,7 +50,15 @@ export class FakePayPal {
       const id = `FAKEORDER${String(++this.seq).padStart(8, '0')}`;
       const total = (body as { purchase_units: { amount: { value: string } }[] }).purchase_units[0]
         ?.amount.value as string;
-      this.orders.set(id, { total, status: 'CREATED' });
+      const unit = (body as { purchase_units: { custom_id?: string; invoice_id?: string }[] })
+        .purchase_units[0];
+      this.orders.set(id, {
+        total,
+        status: 'CREATED',
+        customId: unit?.custom_id,
+        invoiceId: unit?.invoice_id,
+      });
+      this.onOrderChange?.();
       return json(201, { id, status: 'CREATED', links: [] });
     }
     const m = /^\/v2\/checkout\/orders\/([A-Z0-9]+)(\/capture)?$/.exec(url.pathname);
@@ -53,11 +70,27 @@ export class FakePayPal {
         status: order.status,
         intent: 'CAPTURE',
         purchase_units: [
-          { amount: { currency_code: 'USD', value: this.liveAmountOverride ?? order.total } },
+          {
+            reference_id: 'default',
+            custom_id: order.customId,
+            invoice_id: order.invoiceId,
+            amount: { currency_code: 'USD', value: this.liveAmountOverride ?? order.total },
+            payments: order.captures ? { captures: order.captures } : undefined,
+          },
         ],
       });
     }
+    if (m && order && method === 'PATCH') {
+      if (order.status !== 'CREATED') return json(422, { name: 'ORDER_ALREADY_APPROVED' });
+      for (const patch of body as { op: string; path: string; value: string }[]) {
+        if (patch.path.endsWith('/custom_id')) order.customId = patch.value;
+        if (patch.path.endsWith('/invoice_id')) order.invoiceId = patch.value;
+      }
+      this.onOrderChange?.();
+      return new Response(null, { status: 204 });
+    }
     if (m && order && method === 'POST' && m[2]) {
+      await this.beforeCapture?.();
       if (this.captureMode === 'TIMEOUT') throw new DOMException('timed out', 'TimeoutError');
       if (this.captureMode === 'ERROR_500') return json(500, { name: 'INTERNAL_SERVER_ERROR' });
       if (this.captureMode === 'DECLINE') {
@@ -67,6 +100,11 @@ export class FakePayPal {
         });
       }
       const status = this.captureMode;
+      order.status = status === 'COMPLETED' ? 'COMPLETED' : 'APPROVED';
+      order.captures = [
+        { id: `CAP${m[1]}`, status, amount: { currency_code: 'USD', value: order.total } },
+      ];
+      this.onOrderChange?.();
       return json(201, {
         id: m[1],
         status,
@@ -79,6 +117,7 @@ export class FakePayPal {
   approve(orderId: string) {
     const o = this.orders.get(orderId);
     if (o) o.status = 'APPROVED';
+    this.onOrderChange?.();
   }
 
   callsTo(method: string, pathPart: string) {

@@ -103,6 +103,37 @@ export class PayPalRestClient {
     return this.parse(PayPalOrderSchema, res);
   }
 
+  /** The pinned MCP create tool cannot set these IDs. Bind only before buyer approval. */
+  async bindOrder(orderId: string, purchaseId: string, requestId: string): Promise<void> {
+    const live = await this.getOrder(orderId);
+    if (live.data.status !== 'CREATED' || live.data.purchase_units.length !== 1) {
+      throw new UpstreamError('paypal', 'error', 'Order cannot be bound before approval');
+    }
+    const reference = live.data.purchase_units[0]?.reference_id ?? 'default';
+    if (!/^[a-zA-Z0-9_-]+$/.test(reference)) {
+      throw new UpstreamError('paypal', 'error', 'Invalid order reference');
+    }
+    await this.authed('PATCH', `/v2/checkout/orders/${encodeURIComponent(orderId)}`, requestId, {
+      body: JSON.stringify(
+        ['custom_id', 'invoice_id'].map((field) => ({
+          op: 'add',
+          path: `/purchase_units/@reference_id=='${reference}'/${field}`,
+          value: purchaseId,
+        })),
+      ),
+    });
+    const bound = await this.getOrder(orderId);
+    const unit = bound.data.purchase_units[0];
+    if (
+      bound.data.status !== 'CREATED' ||
+      !unit ||
+      unit.custom_id !== purchaseId ||
+      unit.invoice_id !== purchaseId
+    ) {
+      throw new UpstreamError('paypal', 'error', 'Order binding could not be verified');
+    }
+  }
+
   /** Capture always reuses the stored request id so a timeout-then-retry cannot double capture. */
   async captureOrder(orderId: string, requestId: string): Promise<RestResult<CaptureResponse>> {
     const res = await this.authed(
@@ -115,7 +146,7 @@ export class PayPalRestClient {
   }
 
   private async authed(
-    method: 'GET' | 'POST',
+    method: 'GET' | 'POST' | 'PATCH',
     path: string,
     requestId?: string,
     init: { body?: string } = {},
@@ -126,7 +157,7 @@ export class PayPalRestClient {
       headers: {
         Authorization: `Bearer ${token}`,
         Accept: 'application/json',
-        ...(method === 'POST' && { 'Content-Type': 'application/json' }),
+        ...(method !== 'GET' && { 'Content-Type': 'application/json' }),
         ...(requestId && { 'PayPal-Request-Id': requestId }),
       },
       body: init.body,

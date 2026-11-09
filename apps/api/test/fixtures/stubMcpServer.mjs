@@ -1,6 +1,6 @@
 // Stub PayPal MCP server for tests. Mirrors the tool surface verified on @paypal/mcp 1.8.1:
 // create_order and get_order, results returned as JSON text. Behaviour is switched by STUB_MODE.
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, readFileSync } from 'node:fs';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
@@ -42,7 +42,9 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 
 server.setRequestHandler(CallToolRequestSchema, async (req) => {
   const { name, arguments: args = {} } = req.params;
-  log({ event: 'call', name });
+  log({ event: 'call', name, args });
+  if (name === 'get_order' && process.env.STUB_GET_MODE === 'malformed')
+    return text('invalid order');
   if (mode === 'slow') await new Promise((r) => setTimeout(r, 3000));
   if (mode === 'malformed') return text('definitely not json');
   if (mode === 'error_json')
@@ -55,13 +57,23 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
     return text(JSON.stringify({ id, status: 'CREATED', links: [] }));
   }
   if (name === 'get_order') {
+    const shared = process.env.STUB_ORDERS_FILE
+      ? JSON.parse(readFileSync(process.env.STUB_ORDERS_FILE, 'utf8'))[args.id]
+      : undefined;
     const total = orders.get(args.id) ?? process.env.STUB_AMOUNT ?? '1.00';
     return text(
       JSON.stringify({
         id: args.id,
-        status: process.env.STUB_ORDER_STATUS ?? 'APPROVED',
+        status: process.env.STUB_ORDER_STATUS ?? shared?.status ?? 'APPROVED',
         intent: 'CAPTURE',
-        purchase_units: [{ amount: { currency_code: 'USD', value: total } }],
+        purchase_units: [
+          {
+            custom_id: shared?.customId,
+            invoice_id: shared?.invoiceId,
+            amount: { currency_code: 'USD', value: shared?.total ?? total },
+            payments: shared?.captures ? { captures: shared.captures } : undefined,
+          },
+        ],
       }),
     );
   }

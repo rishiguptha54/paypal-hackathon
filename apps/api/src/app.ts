@@ -16,6 +16,23 @@ import { configRouter } from './routes/config';
 import { healthRouter } from './routes/health';
 import { purchasesRouter } from './routes/purchases';
 import { PaymentService } from './services/payments';
+import { MandateService } from './services/mandates';
+import { OfferService } from './services/offers';
+import { PurchaseApiService } from './services/purchaseApi';
+import type { IntentParser } from './adapters/intentParser/types';
+import type { CatalogService } from './adapters/catalog/catalogService';
+import { mandatesRouter } from './routes/mandates';
+import { purchaseApiRouter } from './routes/purchaseApi';
+import { AuditRepository } from './repo/auditViews';
+import { DemoRepository } from './repo/demo';
+import { auditRouter } from './routes/audit';
+import { demoRouter } from './routes/demo';
+import { auditRejections } from './middleware/auditRejections';
+import { rateLimit } from './middleware/rateLimit';
+import { notFound } from './errors';
+import { AnalyticsRepository } from './repo/analytics';
+import { studioRouter } from './routes/studio';
+import { geminiStudioGenerator, type StudioGenerator } from './adapters/studio/gemini';
 
 export interface AppDeps {
   config: Config;
@@ -23,6 +40,9 @@ export interface AppDeps {
   logger: Logger;
   rest: PayPalRestClient;
   gateway: PayPalOrderGateway;
+  parser: IntentParser;
+  catalog: CatalogService;
+  studioGenerator?: StudioGenerator;
   /** Built SPA directory; served only when it exists. */
   webDistDir?: string;
 }
@@ -41,9 +61,29 @@ export function createApp(deps: AppDeps): Express {
     res.setHeader('Cache-Control', 'no-store');
     next();
   });
-  api.use(healthRouter({ db, rest, gateway }));
+  api.use(
+    healthRouter({
+      db,
+      rest,
+      gateway,
+      catalog: deps.catalog,
+      aiStatus: () => deps.parser.status(),
+    }),
+  );
+  api.use(['/demo/seed', '/purchases/:id/simulate-drift'], (_req, _res, next) => {
+    if (!config.demoControlsEnabled) throw notFound();
+    next();
+  });
   api.use(requireJsonBody);
-  api.use(express.json({ limit: '16kb', strict: true, type: 'application/json' }));
+  const json = express.json({ limit: '16kb', strict: true, type: 'application/json' });
+  const studioJson = express.json({ limit: '256kb', strict: true, type: 'application/json' });
+  api.use((req, res, next) => {
+    if (req.path === '/studio-agent/turn') {
+      if (!config.studioAgentEnabled) return next(notFound());
+      return studioJson(req, res, next);
+    }
+    return json(req, res, next);
+  });
   api.use(cookieParser(config.sessionSecret));
   api.use(sessionMiddleware(db));
 
@@ -51,10 +91,32 @@ export function createApp(deps: AppDeps): Express {
     db,
     gateway,
     rest,
+    policyVersion: config.policyVersion,
+  });
+  const mandateService = new MandateService({ db, parser: deps.parser });
+  const offerService = new OfferService({
+    db,
+    catalog: deps.catalog,
+    policyVersion: config.policyVersion,
+  });
+  const purchaseApiService = new PurchaseApiService({
+    db,
+    policyVersion: config.policyVersion,
     approvalTtlSeconds: config.approvalTtlSeconds,
   });
-  api.use(configRouter(config));
+  api.use(configRouter(config, deps.catalog));
+  const paymentLimit = rateLimit(20);
+  api.use('/purchases', (req, res, next) =>
+    req.method === 'GET' ? next() : paymentLimit(req, res, next),
+  );
+  api.use(mandatesRouter(mandateService, offerService));
+  api.use(purchaseApiRouter(purchaseApiService, payments));
   api.use(purchasesRouter(payments));
+  api.use(auditRouter(new AuditRepository(db)));
+  api.use(studioRouter(new AnalyticsRepository(db), config.studioAgentEnabled,
+    deps.studioGenerator ?? (config.studioAgentEnabled && config.aiApiKey
+      ? geminiStudioGenerator(config.aiApiKey, config.aiModel) : undefined), logger));
+  api.use(demoRouter(new DemoRepository(db, config.policyVersion), config.demoControlsEnabled));
   api.use(notFoundHandler);
   app.use('/api', api);
 
@@ -67,6 +129,7 @@ export function createApp(deps: AppDeps): Express {
   }
 
   app.use(notFoundHandler);
+  app.use(auditRejections(db));
   app.use(errorHandler);
   return app;
 }

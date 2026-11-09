@@ -45,6 +45,15 @@ export async function claimOperation(
     .where(and(eq(paymentOperations.purchaseId, v.purchaseId), eq(paymentOperations.kind, v.kind)));
   if (!existing) throw new Error('payment operation vanished after conflict');
   if (existing.status === 'SUCCEEDED') return { op: existing, claimed: false };
+  // MCP create has no idempotency key. An unknown outcome must be reconciled, never replayed.
+  if (
+    v.kind === 'CREATE_ORDER' &&
+    existing.channel === 'mcp' &&
+    !existing.resultOrderId &&
+    (existing.status === 'STARTED' || existing.errorCode === 'MCP_OUTCOME_UNKNOWN')
+  ) {
+    return { op: existing, claimed: false };
+  }
 
   const [reclaimed] = await db
     .update(paymentOperations)
@@ -101,4 +110,11 @@ export async function getOperation(
     .from(paymentOperations)
     .where(and(eq(paymentOperations.purchaseId, purchaseId), eq(paymentOperations.kind, kind)));
   return row;
+}
+
+export async function storeOperationOrder(db: Db, id: string, orderId: string, channel: Channel) {
+  await db
+    .update(paymentOperations)
+    .set({ resultOrderId: orderId, channel })
+    .where(eq(paymentOperations.id, id));
 }

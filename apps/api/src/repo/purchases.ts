@@ -1,47 +1,21 @@
-import { randomUUID } from 'node:crypto';
 import { and, eq, sql } from 'drizzle-orm';
 import type { Purchase, PurchaseState } from '@intentlock/shared';
 import { toMoney } from '../core/money';
 import type { Db } from './db';
-import { purchases, type PurchaseRow } from './schema';
+import { auditEvents, mandates, offerSnapshots, purchases, type PurchaseRow } from './schema';
 
 export type PurchasePatch = Partial<
   Pick<
     PurchaseRow,
-    'paypalOrderId' | 'paypalCaptureId' | 'paypalStatus' | 'blockReasons' | 'approvedAt'
+    | 'paypalOrderId'
+    | 'paypalCaptureId'
+    | 'paypalStatus'
+    | 'blockReasons'
+    | 'approvedAt'
+    | 'approvalExpiresAt'
+    | 'simulatedDrift'
   >
 >;
-
-export async function insertPurchase(
-  db: Db,
-  v: {
-    sessionId: string;
-    itemName: string;
-    quantity: number;
-    unitAmountMinor: bigint;
-    state: PurchaseState;
-    approvedAt?: Date;
-    approvalExpiresAt?: Date;
-  },
-): Promise<PurchaseRow> {
-  const [row] = await db
-    .insert(purchases)
-    .values({
-      id: randomUUID(),
-      sessionId: v.sessionId,
-      itemName: v.itemName,
-      quantity: v.quantity,
-      unitAmountMinor: v.unitAmountMinor,
-      totalMinor: v.unitAmountMinor * BigInt(v.quantity),
-      currency: 'USD',
-      state: v.state,
-      approvedAt: v.approvedAt,
-      approvalExpiresAt: v.approvalExpiresAt,
-    })
-    .returning();
-  if (!row) throw new Error('insert purchase returned no row');
-  return row;
-}
 
 /** Every read is tenant-scoped: a foreign session id yields the same result as a missing row. */
 export async function getPurchase(
@@ -54,6 +28,35 @@ export async function getPurchase(
     .from(purchases)
     .where(and(eq(purchases.id, id), eq(purchases.sessionId, sessionId)));
   return row;
+}
+
+export async function purchaseGateEvidence(tx: Db, p: PurchaseRow) {
+  const [mandate] = p.mandateId
+    ? await tx
+        .select()
+        .from(mandates)
+        .where(and(eq(mandates.id, p.mandateId), eq(mandates.sessionId, p.sessionId)))
+        .for('update')
+    : [];
+  const [snapshot] = p.offerSnapshotId
+    ? await tx
+        .select()
+        .from(offerSnapshots)
+        .where(eq(offerSnapshots.id, p.offerSnapshotId))
+        .for('update')
+    : [];
+  const [created] = await tx
+    .select()
+    .from(auditEvents)
+    .where(
+      and(
+        eq(auditEvents.sessionId, p.sessionId),
+        eq(auditEvents.purchaseId, p.id),
+        eq(auditEvents.type, 'PURCHASE_CREATED'),
+      ),
+    )
+    .limit(1);
+  return { mandate, snapshot, created };
 }
 
 /**
@@ -83,6 +86,9 @@ export async function transitionPurchase(
 export function toPurchaseDto(r: PurchaseRow): Purchase {
   return {
     id: r.id,
+    mandateId: r.mandateId ?? undefined,
+    offerSnapshotId: r.offerSnapshotId ?? undefined,
+    mandateHash: r.mandateHash ?? undefined,
     state: r.state,
     quantity: r.quantity,
     itemName: r.itemName,
@@ -94,6 +100,8 @@ export function toPurchaseDto(r: PurchaseRow): Purchase {
     paypalCaptureId: r.paypalCaptureId ?? undefined,
     paypalStatus: r.paypalStatus ?? undefined,
     blockReasons: r.blockReasons ?? undefined,
+    simulatedDrift: r.simulatedDrift ?? undefined,
+    seeded: r.seeded,
     createdAt: r.createdAt.toISOString(),
     updatedAt: r.updatedAt.toISOString(),
   };

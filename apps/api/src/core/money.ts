@@ -1,19 +1,22 @@
 import type { Money } from '@intentlock/shared';
 
-/** Stage 1 subset of core/money: bigint minor units only, USD only. Stage 2 adds strict parsing. */
+const MONEY_PATTERN = /^(\d{1,9})(?:\.(\d{1,2}))?$/;
+
+export function parseMoneyDecimal(value: string): bigint | null {
+  const match = MONEY_PATTERN.exec(value);
+  if (!match) return null;
+  return BigInt(match[1] as string) * 100n + BigInt((match[2] ?? '').padEnd(2, '0') || '0');
+}
+
+export function parseUsdToMinor(value: string): bigint | null {
+  return parseMoneyDecimal(value);
+}
+
 export function formatUsd(minor: bigint): string {
   if (minor < 0n) throw new RangeError('Negative money is not supported');
-  const cents = (minor % 100n).toString().padStart(2, '0');
-  return `${(minor / 100n).toString()}.${cents}`;
+  return `${minor / 100n}.${(minor % 100n).toString().padStart(2, '0')}`;
 }
 
 export function toMoney(minor: bigint): Money {
   return { minor: minor.toString(), currency: 'USD', display: `$${formatUsd(minor)}` };
-}
-
-/** Strict decimal-string parse ("1", "1.0", "1.00"); anything else is rejected, never rounded. */
-export function parseUsdToMinor(value: string): bigint | null {
-  const m = /^(\d{1,15})(?:\.(\d{1,2}))?$/.exec(value);
-  if (!m) return null;
-  return BigInt(m[1] as string) * 100n + BigInt((m[2] ?? '').padEnd(2, '0') || '0');
 }

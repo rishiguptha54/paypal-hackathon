@@ -17,7 +17,7 @@ function normalize(err: unknown): AppError {
   }
   const type = (err as { type?: string } | null)?.type;
   if (type === 'entity.too.large') {
-    return new AppError(413, 'PAYLOAD_TOO_LARGE', 'Request body exceeds 16 KB.');
+    return new AppError(413, 'PAYLOAD_TOO_LARGE', 'Request body exceeds the allowed size.');
   }
   if (type === 'entity.parse.failed') {
     return new AppError(400, 'VALIDATION_FAILED', 'Request body is not valid JSON.');

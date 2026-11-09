@@ -14,6 +14,7 @@
     "db:migrate": "node --env-file-if-exists=../../.env dist/migrate.js"
   },
   "dependencies": {
+    "@google/genai": "^3.0.0",
     "@intentlock/shared": "*",
     "@modelcontextprotocol/sdk": "^1.32.2",
     "@paypal/mcp": "1.8.1",
@@ -32,7 +33,9 @@
     "@types/node": "^24.19.2",
     "@types/pg": "^8.23.1",
     "@types/supertest": "^7.2.1",
+    "@vitest/coverage-v8": "^5.1.0",
     "drizzle-kit": "^0.31.11",
+    "fast-check": "^4.10.2",
     "supertest": "^7.3.2",
     "tsup": "^9.0.0",
     "tsx": "^4.23.15",

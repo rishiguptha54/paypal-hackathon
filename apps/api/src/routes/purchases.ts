@@ -8,12 +8,6 @@ const IdParams = z.object({ id: z.uuid() });
 export function purchasesRouter(payments: PaymentService) {
   const router = Router();
 
-  // TEMPORARY (Stage 1) until the mandate + approval flow exists.
-  router.post('/dev/purchases', async (req, res) => {
-    CreateOrderRequestSchema.parse(req.body);
-    res.status(201).json(await payments.createTemporaryPurchase(req.sessionId));
-  });
-
   router.post('/purchases/:id/paypal/create-order', async (req, res) => {
     const { id } = IdParams.parse(req.params);
     CreateOrderRequestSchema.parse(req.body);

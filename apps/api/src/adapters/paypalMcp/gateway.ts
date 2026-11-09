@@ -260,7 +260,15 @@ export class PayPalMcpGateway implements PayPalOrderGateway {
         data: rest.data,
         httpStatus: rest.httpStatus,
         debugId: rest.debugId,
-        trace: this.trace('get_order', 'rest', 'ok', started, true, orderId, rest.debugId),
+        trace: this.trace(
+          'get_order',
+          'rest',
+          e instanceof UpstreamError && e.kind === 'timeout' ? 'timeout' : 'error',
+          started,
+          true,
+          orderId,
+          rest.debugId,
+        ),
       };
     }
   }

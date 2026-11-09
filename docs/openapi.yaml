@@ -1,0 +1,732 @@
+openapi: 3.1.0
+info:
+  title: IntentLock API
+  version: 0.3.0
+  description: Session-scoped, policy-governed procurement API. PayPal Sandbox only.
+servers:
+  - url: /api
+paths:
+  /health:
+    get:
+      summary: Read dependency health status
+      responses:
+        '200':
+          description: Dependency status values only.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, checks]
+                properties:
+                  status: { type: string, enum: [ok, degraded, down] }
+                  checks:
+                    type: object
+                    required: [db, paypal, paypalMcp, catalog, ai]
+                    properties:
+                      db: { type: string, enum: [ok, degraded, down] }
+                      paypal: { type: string, enum: [ok, degraded, down] }
+                      paypalMcp: { type: string, enum: [ok, degraded, down] }
+                      catalog: { type: string, enum: [ok, degraded, down] }
+                      ai: { type: string, enum: [ok, degraded, down] }
+        '503': { description: Database unavailable }
+  /config:
+    get:
+      summary: Read public client configuration
+      responses:
+        '200':
+          description: Public values, active-catalog merchant presets, and scenario presets.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  [
+                    paypalClientId,
+                    productSource,
+                    aiProvider,
+                    environment,
+                    merchantPresets,
+                    scenarioPresets,
+                    demoControlsEnabled,
+                    studioAgentEnabled,
+                  ]
+                properties:
+                  paypalClientId: { type: string }
+                  productSource: { type: string, enum: [channel3, fixture] }
+                  aiProvider: { type: string, enum: [gemini, rule] }
+                  environment: { type: string, const: sandbox }
+                  merchantPresets: { type: array, items: { type: string } }
+                  scenarioPresets:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, label, requestText]
+                      properties:
+                        id: { type: string, enum: [HAPPY_PATH, BLOCKED_OFFER, PRECAPTURE_DRIFT] }
+                        label: { type: string }
+                        requestText: { type: string }
+                  demoControlsEnabled: { type: boolean }
+                  studioAgentEnabled: { type: boolean }
+  /mandates:
+    post:
+      summary: Parse user purchase intent into a draft mandate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [requestText]
+              properties:
+                requestText: { type: string, minLength: 2, maxLength: 1000 }
+      responses:
+        '201': { description: Draft or clarification-needed mandate }
+        '400': { $ref: '#/components/responses/BadRequest' }
+  /mandates/{id}:
+    get:
+      summary: Read a session-owned mandate
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200': { description: Mandate }
+        '404': { description: Not found }
+  /mandates/{id}/confirm:
+    post:
+      summary: Confirm or version a mandate
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MandateFields' }
+      responses:
+        '200': { description: Confirmed mandate }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409': { description: State conflict }
+  /mandates/{id}/search:
+    post:
+      summary: Search the active catalog and evaluate every offer
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+      responses:
+        '200': { description: Catalog source and evaluated offer snapshots }
+        '409': { description: Mandate is not confirmed }
+  /purchases:
+    post:
+      summary: Create a purchase from a freshly re-evaluated allowed offer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [mandateId, offerSnapshotId]
+              properties:
+                mandateId: { type: string, format: uuid }
+                offerSnapshotId: { type: string, format: uuid }
+      responses:
+        '201': { description: Pending-approval purchase with server-calculated total and hash }
+        '409': { description: Policy blocked or state conflict }
+  /purchases/{id}:
+    get:
+      summary: Read a session-owned purchase and reconcile stale CAPTURING or CAPTURE_PENDING
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: Purchase; CAPTURING older than 60 seconds is reconciled from live capture evidence.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Purchase' }
+        '404': { description: Not found }
+        '504': { description: Neither live order read succeeded; capture is never inferred }
+  /purchases/{id}/approve:
+    post:
+      summary: Approve the exact server-generated purchase hash
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [mandateHash]
+              properties:
+                mandateHash: { type: string, pattern: '^[a-f0-9]{64}$' }
+      responses:
+        '200': { description: Approved purchase and approval expiry }
+        '409': { description: Hash mismatch or invalid state }
+  /purchases/{id}/cancel:
+    post:
+      summary: Cancel an eligible session-owned purchase
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+      responses:
+        '200': { description: Cancelled purchase }
+        '409': { description: Invalid state }
+  /purchases/{id}/paypal/create-order:
+    post:
+      summary: Create and bind an approved purchase to a Sandbox order
+      description: >
+        Uses MCP create_order with REST creation fallback only if MCP was unavailable before sending.
+        The pinned tool cannot accept custom_id, invoice_id or a request ID. MCP-created orders are
+        bound with REST PATCH and verified while CREATED, before buyer approval. A known order's
+        binding can be retried; an unknown MCP create outcome is never automatically replayed.
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        $ref: '#/components/requestBodies/Empty'
+      responses:
+        '200':
+          description: Existing or newly created order
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [paypalOrderId]
+                properties:
+                  paypalOrderId: { type: string, pattern: '^[A-Z0-9]{17,32}$' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { description: Not found }
+        '409':
+          {
+            description: Invalid state,
+            expired approval,
+            sample purchase or unknown MCP create outcome,
+          }
+        '502': { description: PayPal creation or binding failed }
+        '504': { description: PayPal timed out }
+  /purchases/{id}/paypal/capture:
+    post:
+      summary: Run G1-G7 against the live order and capture once with the stored request ID
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [paypalOrderId]
+              properties:
+                paypalOrderId: { type: string, pattern: '^[A-Z0-9]{17,32}$' }
+      responses:
+        '200':
+          description: Verified CAPTURED or CAPTURE_PENDING purchase; completed replays are idempotent.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Purchase' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { description: Not found }
+        '409':
+          description: >
+            CAPTURE_BLOCKED with failed reason codes, STATE_CONFLICT, or INSTRUMENT_DECLINED
+            (returns to ORDER_CREATED and reuses the same capture request ID).
+        '502': { description: Capture provider error; an unknown outcome remains CAPTURING }
+        '504':
+          {
+            description: Neither live read succeeded (ORDER_CREATED),
+            or capture timed out (CAPTURING),
+          }
+  /audit:
+    get:
+      summary: Read the session's offer and purchase ledger
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+        - name: cursor
+          in: query
+          schema: { type: string, maxLength: 512 }
+        - name: decision
+          in: query
+          schema: { type: string, enum: [ALLOWED, BLOCKED, NEEDS_REVIEW] }
+        - name: state
+          in: query
+          schema: { $ref: '#/components/schemas/PurchaseState' }
+        - name: seeded
+          in: query
+          schema: { type: string, enum: ['true', 'false'] }
+      responses:
+        '200':
+          description: Rows sorted by descending time then ID; nextCursor is null at the end.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [rows, nextCursor]
+                properties:
+                  rows:
+                    type: array
+                    items: { $ref: '#/components/schemas/LedgerRow' }
+                  nextCursor: { type: [string, 'null'] }
+        '400': { $ref: '#/components/responses/BadRequest' }
+  /audit/verify:
+    get:
+      summary: Recompute the caller's entire session hash chain
+      responses:
+        '200':
+          description: INTACT with event count, or BROKEN with the first broken sequence and zero-based index.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, checked]
+                properties:
+                  status: { type: string, enum: [INTACT, BROKEN] }
+                  checked: { type: integer, minimum: 0 }
+                  firstBrokenSeq: { type: string, pattern: '^\d+$' }
+                  firstBrokenIndex: { type: integer, minimum: 0 }
+  /purchases/{id}/receipt:
+    get:
+      summary: Read a session-owned purchase's full intent receipt
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: Intent receipt with approval, gate/capture evidence and MCP trace summaries.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IntentReceipt' }
+        '404': { description: Not found }
+  /offers/{id}/receipt:
+    get:
+      summary: Read a session-owned offer receipt, including blocked and review offers
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: Intent receipt without a purchase.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IntentReceipt' }
+        '404': { description: Not found }
+  /purchases/{id}/simulate-drift:
+    post:
+      summary: Store a fail-only capture override on an ORDER_CREATED purchase
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [kind]
+              properties:
+                kind: { $ref: '#/components/schemas/DriftKind' }
+      responses:
+        '200':
+          description: Purchase with simulatedDrift; original mandate, snapshot and approval hash remain unchanged.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Purchase' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { description: Not found or DEMO_CONTROLS_ENABLED=false }
+        '409': { description: Not ORDER_CREATED or a sample purchase }
+  /demo/seed:
+    post:
+      summary: Insert fixed session sample history without PayPal or MCP calls
+      requestBody:
+        $ref: '#/components/requestBodies/Empty'
+      responses:
+        '201':
+          description: Sample rows created and DEMO_SEEDED appended.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SeedResult' }
+        '200':
+          description: Already seeded; original counts returned, no new rows or events.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SeedResult' }
+        '404': { description: DEMO_CONTROLS_ENABLED=false }
+        '429': { description: More than three seed requests per session per minute }
+  /analytics/dataset:
+    get:
+      summary: Read the session-scoped governance analytics dataset
+      parameters:
+        - name: days
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 90, default: 30 }
+      responses:
+        '200':
+          description: Up to 5,000 offer evaluation rows for the session.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [rows]
+                properties:
+                  rows:
+                    type: array
+                    maxItems: 5000
+                    items: { $ref: '#/components/schemas/AnalyticsRow' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+  /studio-agent/turn:
+    post:
+      summary: Request one restricted Governance Analyst turn
+      description: >
+        Requires STUDIO_AGENT_ENABLED and Gemini configuration. The request is limited
+        to 256 KB for AG Studio tool schemas; all other API JSON bodies remain limited
+        to 16 KB. Returns AG-UI-compatible server-sent events. Payment and PayPal MCP
+        tools are not permitted.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StudioTurnRequest' }
+      responses:
+        '200':
+          description: AG-UI-compatible event stream.
+          content:
+            text/event-stream:
+              schema: { type: string }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { description: STUDIO_AGENT_ENABLED=false }
+        '409': { description: Eight-turn run limit reached }
+        '429': { description: Per-session rate limit exceeded }
+        '502': { description: Invalid model response or upstream failure }
+        '503': { description: Gemini is unavailable or the agent is busy }
+        '504': { description: Gemini request timed out }
+components:
+  requestBodies:
+    Empty:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+  schemas:
+    Money:
+      type: object
+      additionalProperties: false
+      required: [minor, currency, display]
+      properties:
+        minor: { type: string, pattern: '^\d{1,18}$' }
+        currency: { type: string, const: USD }
+        display: { type: string }
+    Finding:
+      type: object
+      required: [code, severity, message, evidence]
+      properties:
+        code:
+          type: string
+          description: >
+            Capture reasons include ORDER_MISMATCH, PAYPAL_NOT_APPROVED, DRIFT_AMOUNT_MISMATCH,
+            CUSTOM_ID_MISMATCH, DRIFT_MERCHANT_MISMATCH, MANDATE_CHANGED, POLICY_NOW_BLOCKS, APPROVAL_EXPIRED.
+        severity: { type: string, enum: [BLOCKING, REVIEW, INFO] }
+        message: { type: string }
+        evidence:
+          type: object
+          additionalProperties: { type: [string, number, boolean] }
+    PurchaseState:
+      type: string
+      enum:
+        [
+          PENDING_APPROVAL,
+          APPROVED,
+          ORDER_CREATED,
+          CAPTURING,
+          CAPTURED,
+          CAPTURE_PENDING,
+          CAPTURE_FAILED,
+          BLOCKED_AT_CAPTURE,
+          CANCELLED,
+          EXPIRED,
+          REVERSED,
+        ]
+    DriftKind:
+      type: string
+      enum: [PRICE_HIKE, MERCHANT_SWAP, APPROVAL_EXPIRED]
+    Purchase:
+      type: object
+      required: [id, state, quantity, itemName, unitPrice, total, seeded, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        mandateId: { type: string, format: uuid }
+        offerSnapshotId: { type: string, format: uuid }
+        mandateHash: { type: string, pattern: '^[a-f0-9]{64}$' }
+        state: { $ref: '#/components/schemas/PurchaseState' }
+        quantity: { type: integer, minimum: 1 }
+        itemName: { type: string }
+        unitPrice: { $ref: '#/components/schemas/Money' }
+        total: { $ref: '#/components/schemas/Money' }
+        approvedAt: { type: string, format: date-time }
+        approvalExpiresAt: { type: string, format: date-time }
+        paypalOrderId: { type: string }
+        paypalCaptureId: { type: string }
+        paypalStatus: { type: string }
+        blockReasons:
+          type: array
+          items: { $ref: '#/components/schemas/Finding' }
+        simulatedDrift: { $ref: '#/components/schemas/DriftKind' }
+        seeded: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    LedgerRow:
+      type: object
+      required:
+        [
+          id,
+          time,
+          kind,
+          product,
+          merchant,
+          source,
+          decision,
+          reasonCodes,
+          approvalHashStatus,
+          mcpTraceStatus,
+          seeded,
+        ]
+      properties:
+        id: { type: string, format: uuid }
+        time: { type: string, format: date-time }
+        kind: { type: string, enum: [OFFER, PURCHASE] }
+        product: { type: string }
+        merchant: { type: [string, 'null'] }
+        source: { type: string, enum: [channel3, fixture] }
+        decision: { type: string, enum: [ALLOWED, BLOCKED, NEEDS_REVIEW] }
+        reasonCodes: { type: array, items: { type: string } }
+        approvalHashStatus: { type: string, enum: [NONE, LOCKED, VERIFIED, MISMATCH] }
+        mcpTraceStatus: { type: string, enum: [NONE, OK, FALLBACK_REST, ERROR] }
+        paypalOrderId: { type: string }
+        state: { $ref: '#/components/schemas/PurchaseState' }
+        total: { $ref: '#/components/schemas/Money' }
+        seeded: { type: boolean }
+    SeedResult:
+      type: object
+      required: [seeded]
+      properties:
+        seeded:
+          type: object
+          required: [mandates, evaluations, purchases]
+          properties:
+            mandates: { type: integer, minimum: 0 }
+            evaluations: { type: integer, minimum: 0 }
+            purchases: { type: integer, minimum: 0 }
+    AnalyticsRow:
+      type: object
+      required:
+        [
+          time,
+          day,
+          productQuery,
+          source,
+          decision,
+          primaryReason,
+          reasonCodes,
+          approved,
+          blockedAtCapture,
+          captureBlockCodes,
+          mcpTraceStatus,
+          policyVersion,
+          seeded,
+        ]
+      properties:
+        time: { type: string, format: date-time }
+        day: { type: string, format: date }
+        productQuery: { type: string }
+        merchantDomain: { type: string }
+        source: { type: string, enum: [channel3, fixture] }
+        decision: { type: string, enum: [ALLOWED, BLOCKED, NEEDS_REVIEW] }
+        primaryReason: { type: string }
+        reasonCodes: { type: array, items: { type: string } }
+        offerTotalMinor: { type: string, pattern: '^\d+$' }
+        approved: { type: boolean }
+        purchaseState: { $ref: '#/components/schemas/PurchaseState' }
+        capturedTotalMinor: { type: string, pattern: '^\d+$' }
+        blockedAtCapture: { type: boolean }
+        captureBlockCodes: { type: array, items: { type: string } }
+        mcpTraceStatus: { type: string, enum: [NONE, OK, FALLBACK_REST, ERROR] }
+        approvalToCaptureSeconds: { type: number, minimum: 0 }
+        policyVersion: { type: string }
+        seeded: { type: boolean }
+    StudioTurnRequest:
+      type: object
+      additionalProperties: false
+      required: [threadId, messages, tools]
+      properties:
+        threadId: { type: string, minLength: 1, maxLength: 200 }
+        runId: { type: string, minLength: 1, maxLength: 200 }
+        messages:
+          type: array
+          minItems: 1
+          maxItems: 80
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, role]
+            properties:
+              id: { type: string, minLength: 1, maxLength: 200 }
+              role: { type: string, enum: [user, assistant, tool, system, developer] }
+              content: { type: string, maxLength: 32000 }
+              name: { type: string, maxLength: 100 }
+              toolCallId: { type: string, maxLength: 200 }
+              error: { type: string, maxLength: 1000 }
+              toolCalls:
+                type: array
+                maxItems: 10
+                items:
+                  type: object
+                  additionalProperties: false
+                  required: [id, type, function]
+                  properties:
+                    id: { type: string, minLength: 1, maxLength: 200 }
+                    type: { type: string, const: function }
+                    function:
+                      type: object
+                      additionalProperties: false
+                      required: [name, arguments]
+                      properties:
+                        name: { type: string }
+                        arguments: { type: string, maxLength: 8000 }
+        tools:
+          type: array
+          maxItems: 24
+          items:
+            type: object
+            additionalProperties: false
+            required: [name, description, parameters]
+            properties:
+              name: { type: string, pattern: '^[a-z_]{1,80}$' }
+              description: { type: string, maxLength: 4000 }
+              parameters:
+                type: object
+                additionalProperties: true
+              kind: { type: string, const: client }
+    EvaluatedOffer:
+      type: object
+      required:
+        [
+          snapshotId,
+          source,
+          title,
+          recurrenceSignal,
+          decision,
+          findings,
+          policyVersion,
+          observedAt,
+          seeded,
+        ]
+      properties:
+        snapshotId: { type: string, format: uuid }
+        source: { type: string, enum: [channel3, fixture] }
+        title: { type: string }
+        brand: { type: string }
+        merchantName: { type: string }
+        merchantDomain: { type: string }
+        offerUrl: { type: string }
+        unitPrice: { $ref: '#/components/schemas/Money' }
+        totalPrice: { $ref: '#/components/schemas/Money' }
+        recurrenceSignal: { type: string, enum: [NONE, RECURRING, AMBIGUOUS] }
+        decision: { type: string, enum: [ALLOWED, BLOCKED, NEEDS_REVIEW] }
+        findings: { type: array, items: { $ref: '#/components/schemas/Finding' } }
+        policyVersion: { type: string }
+        observedAt: { type: string, format: date-time }
+        seeded: { type: boolean }
+    IntentReceipt:
+      type: object
+      required: [requestText, mandate, offer, mcpTrace, events, chain, sandboxNotice, seeded]
+      properties:
+        requestText: { type: string }
+        mandate:
+          type: object
+          description: The original mandate DTO, including parser, version, status and confirmed fields.
+        offer: { $ref: '#/components/schemas/EvaluatedOffer' }
+        purchase: { $ref: '#/components/schemas/Purchase' }
+        approval:
+          type: object
+          required: [mandateHash, approvedAt, expiresAt]
+          properties:
+            mandateHash: { type: string }
+            approvedAt: { type: string, format: date-time }
+            expiresAt: { type: string, format: date-time }
+        mcpTrace:
+          type: array
+          items:
+            type: object
+            required: [tool, status, durationMs, at, fallbackToRest]
+            properties:
+              tool: { type: string, enum: [create_order, get_order] }
+              status: { type: string, enum: [OK, ERROR, TIMEOUT] }
+              durationMs: { type: number, minimum: 0 }
+              at: { type: string, format: date-time }
+              fallbackToRest: { type: boolean }
+        paypal:
+          type: object
+          required: [orderId, status]
+          properties:
+            orderId: { type: string }
+            captureId: { type: string }
+            status: { type: string }
+            debugId: { type: string }
+        events:
+          type: array
+          items:
+            type: object
+            required: [seq, type, createdAt, entryHash]
+            properties:
+              seq: { type: string, pattern: '^\d+$' }
+              type: { type: string }
+              createdAt: { type: string, format: date-time }
+              entryHash: { type: string, pattern: '^[a-f0-9]{64}$' }
+        chain: { type: string, enum: [INTACT, BROKEN] }
+        sandboxNotice: { type: string }
+        seeded: { type: boolean }
+    MandateFields:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          productQuery,
+          quantity,
+          maxTotal,
+          currency,
+          allowedMerchantDomains,
+          recurringAllowed,
+          excludedTerms,
+        ]
+      properties:
+        productQuery: { type: string, minLength: 2, maxLength: 200 }
+        quantity: { type: integer, minimum: 1, maximum: 100 }
+        maxTotal: { type: string, pattern: "^\\d{1,9}(\\.\\d{1,2})?$" }
+        currency: { type: string, const: USD }
+        allowedMerchantDomains:
+          { type: array, minItems: 1, maxItems: 20, items: { type: string, format: hostname } }
+        recurringAllowed: { type: boolean }
+        excludedTerms:
+          { type: array, maxItems: 20, items: { type: string, minLength: 2, maxLength: 40 } }
+  responses:
+    BadRequest:
+      description: Invalid or unexpected request fields

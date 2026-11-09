@@ -17,7 +17,7 @@ export const notFound = () => new AppError(404, 'NOT_FOUND', 'Resource not found
 export const stateConflict = (message: string, details: ErrorDetail[] = []) =>
   new AppError(409, 'STATE_CONFLICT', message, details);
 
-export type UpstreamProvider = 'paypal_mcp' | 'paypal';
+export type UpstreamProvider = 'ai' | 'channel3' | 'paypal_mcp' | 'paypal';
 
 /** Raised by adapters. Routes map it to 502 / 504 with only the provider name exposed. */
 export class UpstreamError extends Error {

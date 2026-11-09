@@ -2,6 +2,8 @@ import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Express } from 'express';
 import { buildTestApp, restOnlyGateway } from '../helpers/app';
+import { RuleBasedParser } from '../../src/adapters/intentParser/ruleBasedParser';
+import { approvedPurchase } from '../helpers/flow';
 
 let ctx: Awaited<ReturnType<typeof buildTestApp>>;
 beforeAll(async () => {
@@ -104,7 +106,7 @@ describe('SEC-12 JSON only + 16 KB limit', () => {
       .set('Content-Type', 'application/json')
       .send('{"a":');
     expect(bad.status).toBe(400);
-    const extra = await request(ctx.app).post('/api/dev/purchases').send({ total: '0.01' });
+    const extra = await request(ctx.app).post('/api/purchases').send({ total: '0.01' });
     expect(extra.status).toBe(400);
     expect(extra.body.error.code).toBe('UNEXPECTED_FIELD');
   });
@@ -121,8 +123,8 @@ describe('SEC-02 error envelope', () => {
       }),
     });
     const c = client(boom.app);
-    const p = await c.post('/api/dev/purchases');
-    const res = await c.post(`/api/purchases/${p.body.id as string}/paypal/create-order`);
+    const p = await approvedPurchase(c);
+    const res = await c.post(`/api/purchases/${p.id}/paypal/create-order`);
     expect(res.status).toBe(500);
     expect(res.body).toEqual({
       error: {
@@ -182,7 +184,33 @@ describe('GET /api/config and /api/health', () => {
       productSource: 'fixture',
       aiProvider: 'rule',
       environment: 'sandbox',
+      merchantPresets: [
+        'northstar-office.example',
+        'northstar-office.example.unlisted-supply.example',
+        'unlisted-supply.example',
+      ],
+      scenarioPresets: [
+        {
+          id: 'HAPPY_PATH',
+          label: 'Allowed purchase',
+          requestText:
+            'Buy 1 ergonomic desk chair for no more than $120 from northstar-office.example.',
+        },
+        {
+          id: 'BLOCKED_OFFER',
+          label: 'Over-budget offer',
+          requestText:
+            'Buy 1 ergonomic desk chair for no more than $50 from northstar-office.example.',
+        },
+        {
+          id: 'PRECAPTURE_DRIFT',
+          label: 'Pre-capture drift',
+          requestText:
+            'Buy 1 ergonomic desk chair for no more than $120 from northstar-office.example.',
+        },
+      ],
       demoControlsEnabled: false,
+      studioAgentEnabled: false,
     });
     expect(JSON.stringify(res.body)).not.toMatch(/test-client-secret|DATABASE|SESSION/);
   });
@@ -192,7 +220,7 @@ describe('GET /api/config and /api/health', () => {
     expect(res.status).toBe(200);
     expect(res.body).toEqual({
       status: 'degraded',
-      checks: { db: 'ok', paypal: 'ok', paypalMcp: 'down' },
+      checks: { db: 'ok', paypal: 'ok', paypalMcp: 'down', catalog: 'ok', ai: 'ok' },
     });
     const raw = JSON.stringify(res.body);
     expect(raw).not.toMatch(/https?:|key|secret|error|token/i);
@@ -205,5 +233,20 @@ describe('GET /api/config and /api/health', () => {
     expect(res.status).toBe(503);
     expect(res.body.status).toBe('down');
     expect(res.body.checks.db).toBe('down');
+  });
+
+  it('reflects Gemini fallback status changes without restarting the API', async () => {
+    let aiStatus: 'ok' | 'degraded' = 'ok';
+    const parser = new RuleBasedParser();
+    const probe = await buildTestApp({
+      parser: {
+        parse: (text) => parser.parse(text),
+        status: () => aiStatus,
+      },
+    });
+    expect((await request(probe.app).get('/api/health')).body.checks.ai).toBe('ok');
+    aiStatus = 'degraded';
+    expect((await request(probe.app).get('/api/health')).body.checks.ai).toBe('degraded');
+    await probe.close();
   });
 });
