@@ -113,9 +113,17 @@ export function createApp(deps: AppDeps): Express {
   api.use(purchaseApiRouter(purchaseApiService, payments));
   api.use(purchasesRouter(payments));
   api.use(auditRouter(new AuditRepository(db)));
-  api.use(studioRouter(new AnalyticsRepository(db), config.studioAgentEnabled,
-    deps.studioGenerator ?? (config.studioAgentEnabled && config.aiApiKey
-      ? geminiStudioGenerator(config.aiApiKey, config.aiModel) : undefined), logger));
+  api.use(
+    studioRouter(
+      new AnalyticsRepository(db),
+      config.studioAgentEnabled,
+      deps.studioGenerator ??
+        (config.studioAgentEnabled && config.aiApiKey
+          ? geminiStudioGenerator(config.aiApiKey, config.aiModel)
+          : undefined),
+      logger,
+    ),
+  );
   api.use(demoRouter(new DemoRepository(db, config.policyVersion), config.demoControlsEnabled));
   api.use(notFoundHandler);
   app.use('/api', api);

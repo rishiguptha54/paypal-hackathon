@@ -3,7 +3,7 @@ import { createLogger } from './logger';
 import { MIGRATIONS_DIR } from './paths';
 import { createPgDb } from './repo/db';
 
-// Run as the Render pre-deploy command, never at request time. Reads DATABASE_URL only so it
+// Run before server startup, never at request time. Reads DATABASE_URL only so it
 // does not require PayPal credentials.
 async function run() {
   const logger = createLogger();

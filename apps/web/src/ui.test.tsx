@@ -15,12 +15,34 @@ describe('SEC-05 text-only surfaces and exact money', () => {
   it('escapes request, merchant, product and MCP receipt evidence', () => {
     const receipt: IntentReceipt = {
       requestText: attack,
-      mandate: { id: 'm', version: 1, status: 'CONFIRMED', requestText: attack,
-        recurringAllowed: false, excludedTerms: [], clarificationQuestions: [], parser: 'rule', createdAt: '' },
-      offer: { snapshotId: 'o', source: 'fixture', title: attack, merchantDomain: attack,
-        decision: 'BLOCKED', findings: [], recurrenceSignal: 'NONE', observedAt: '',
-        policyVersion: 'v1', seeded: false },
-      mcpTrace: [], events: [], chain: 'INTACT', sandboxNotice: 'Sandbox', seeded: false,
+      mandate: {
+        id: 'm',
+        version: 1,
+        status: 'CONFIRMED',
+        requestText: attack,
+        recurringAllowed: false,
+        excludedTerms: [],
+        clarificationQuestions: [],
+        parser: 'rule',
+        createdAt: '',
+      },
+      offer: {
+        snapshotId: 'o',
+        source: 'fixture',
+        title: attack,
+        merchantDomain: attack,
+        decision: 'BLOCKED',
+        findings: [],
+        recurrenceSignal: 'NONE',
+        observedAt: '',
+        policyVersion: 'v1',
+        seeded: false,
+      },
+      mcpTrace: [],
+      events: [],
+      chain: 'INTACT',
+      sandboxNotice: 'Sandbox',
+      seeded: false,
     };
     const html = renderToStaticMarkup(<ReceiptDrawer receipt={receipt} close={() => undefined} />);
     expect(html).toContain('&lt;img');

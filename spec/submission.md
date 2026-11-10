@@ -17,7 +17,7 @@
 |---|---|---|---|---|
 | C1 | Uses the PayPal developer platform in **Sandbox**, and PayPal is **central** | **PayPal MCP Server** `create_order` / `get_order` mediated by IntentLock's deterministic gate → buyer approval (JS SDK v6 or react-paypal-js) → pre-capture verification → Orders v2 capture | Video 1:20–2:20; `adapters/paypalMcp`, `adapters/paypal` | A |
 | C2 | Uses an AI tool/model **meaningfully** | (1) LLM drafts the purchase mandate from plain English; (2) AG Studio agent builds governance dashboards on request | Video 0:15–0:35, 2:20–2:45 | B |
-| C3 | Working project, runs as shown in the video | Hosted URL **and** `docker compose up` / `npm run dev` path | G2, G3, G4 | D |
+| C3 | Working project, runs as shown in the video | Hosted URL (pending deployment) and `npm run dev` with a hosted Postgres URL; no Docker required | Local checks in [TESTING.md](../TESTING.md); hosted verification pending | D |
 | C4 | Text description of features | Devpost story (§4) | Devpost | Lead |
 | C5 | **"Tools" field**: name each AI model/service and how it is used | §4.3 table | Devpost | Lead |
 | C6 | Public repo on GitHub with all source, assets, instructions | `README.md` + `spec/` | Repo | D |
@@ -25,7 +25,7 @@
 | C8 | Video < 3 min, public on YouTube, shows the app working | [plan.md §7](plan.md#7-demo-video-script-under-3-minutes) | YouTube link | All |
 | C9 | No third-party trademarks or copyrighted music in the video without permission | No music (or a CC0/royalty-free track with license saved); fixtures use **fictional `.example` merchants**; no retailer logos or product images on screen | Frame review checklist §6 | D |
 | C10 | Judges get access: test credentials, keys or sandbox logins | §5 Judge Quickstart | README "Judge Quickstart & Test Scenarios" | A |
-| C11 | Free, unrestricted access for testing until judging ends (15 Dec) | Render starter instance + paid Postgres (credits), uptime monitor, no paywall/login | §7 runbook | D |
+| C11 | Free, unrestricted access for testing until judging ends (15 Dec) | Planned Render free web service with 10-minute health pings; live availability and database retention must be verified and disclosed | §7 runbook | D |
 | C12 | Third-party APIs/SDKs used under their terms | §8 license register | `THIRD_PARTY_NOTICES.md` | D |
 | C13 | Original work owned by the entrants | Built during the submission period; commit history shows it | Git history (no history squash) | All |
 | C14 | All materials in English | — | — | Lead |
@@ -62,48 +62,69 @@ Allowed: at most **one Grand Prize or one Honorable Mention**, plus **one Sponso
 |---|---|
 | Project name | IntentLock |
 | Tagline (≤ 200 chars) | "AI proposes. Code enforces. You approve. A buyer-side gate in front of the PayPal MCP Server that refuses capture if the order drifts from your locked mandate." |
-| Built with (tags) | `paypal`, `paypal-mcp-server`, `model-context-protocol`, `paypal-orders-api`, `paypal-js-sdk`, `typescript`, `react`, `node.js`, `express`, `postgresql`, `zod`, `<ai-provider>`, `channel3`, `ag-grid`, `ag-studio`, `render`, `postman`, `playwright` |
-| Try it out links | Hosted URL · GitHub repo · Postman collection |
+| Built with (tags) | `paypal`, `paypal-mcp-server`, `model-context-protocol`, `paypal-orders-api`, `paypal-js-sdk`, `typescript`, `react`, `node.js`, `express`, `postgresql`, `zod`, `google-gemini`, `channel3`, `ag-grid`, `ag-studio`, `render`, `postman`, `playwright` |
+| Try it out links | Hosted URL (add after verified deployment) · GitHub repo · [Postman collection](../postman/IntentLock.postman_collection.json) |
 | Video | YouTube (public) |
 | Image gallery (5–7 images, 3:2) | 1 hero (flow diagram with MCP gate) · 2 mandate editor with merchant chips · 3 offers with block reasons · 4 PayPal sandbox approval · 5 pre-capture drift block (`DRIFT_AMOUNT_MISMATCH`) · 6 Governance Studio dashboard · 7 Intent Receipt with MCP trace and chain INTACT |
 
-### 4.2 Story outline (Devpost's standard sections)
+### 4.2 Devpost story (copy-ready draft)
 
-| Section | Content (keep each to 3–6 sentences; facts only) |
-|---|---|
-| Inspiration | AI agents can shop, but a recommendation isn't an authorization. Small-business owners need to hand off routine buying without losing control of spend. |
-| What it does | The five-step flow; the three outcomes (allow / block / review); PayPal MCP tools called only by the deterministic gate; the pre-capture verification of the live order; the receipt and dashboard. |
-| How we built it | Architecture diagram; LLM only drafts; pure rules engine; mandate hash; `PayPalMcpGateway` (`create_order`, `get_order`) + Orders v2 capture with `PayPal-Request-Id`; JS SDK v6 / react-paypal-js; Channel3 search; AG Studio + agent; Postgres CAS state machine; Render. |
-| Challenges | E.g., keeping PayPal MCP tools away from the LLM while still using them; making capture idempotent under retries; recurrence detection without a provider field. **Write only what actually happened.** |
-| Accomplishments | Measured results from CI (actual test counts), drift and tamper scenarios blocked on camera. |
-| What we learned | Real learnings only. |
-| What's next | Expose IntentLock itself as an MCP tool (e.g. `purchase_within_mandate`) so outside agents must go through the gate; PayPal Agent Toolkit integration; multi-currency; team approval chains. |
+**Publication gate:** This describes implemented behavior, not a completed hosted demo. Complete live smoke, add verified hosted/video links and identify the actual model used before publishing. Mocked test evidence is not a live-payment claim.
+
+#### Inspiration
+
+An AI recommendation is not a purchase authorization. A small-business buyer may delegate finding a chair while still needing control over budget, approved merchants and subscriptions. IntentLock separates those responsibilities: AI proposes, code enforces and the buyer approves.
+
+#### What it does
+
+A request becomes a draft mandate that the buyer reviews and confirms. Product candidates receive deterministic ALLOWED, BLOCKED or NEEDS_REVIEW decisions with reason codes. The buyer approves one exact server-calculated purchase before opening PayPal Sandbox. Before capture, the backend verifies the live PayPal order against the locked mandate; drift blocks capture and produces an auditable receipt. The ledger and Governance Studio explain the session's decisions, with synthetic history clearly labelled.
+
+#### How we built it
+
+React 19 and TypeScript provide the request-to-checkout flow, AG Grid Community ledger and AG Studio dashboard. The Express backend validates external inputs with Zod, stores money as bigint minor units and persists state and a hash-chained audit in Postgres. The Google GenAI adapter drafts intent with structured JSON output; the rule parser and fixture catalog make offline tests possible. Channel3 is an optional live backend catalog source. The server mediates PayPal MCP `create_order` and `get_order`; REST binds and verifies the order and performs capture with a stable request ID. The model has no authority to approve or capture.
+
+#### Challenges we addressed
+
+The pinned MCP create tool cannot carry all IntentLock purchase bindings, so the server binds and verifies its created order before exposing it to the browser. Unknown create outcomes are not blindly retried. Capture uses compare-and-set state transitions, a persisted request ID and reconciliation instead of interpreting timeouts as success. The demo drift control adds failures to the capture gate and cannot authorize a payment.
+
+#### Accomplishments
+
+The implemented flow includes strict tamper rejection, server-side capture verification, receipts with MCP traces, a filterable Community ledger and a dashboard-only Governance Analyst. The release suite exercises the requested judge scenarios with local PayPal mocks and a stub MCP server, including keyboard checkout and an axe scan. See [TESTING.md](../TESTING.md) for observed counts and command results; no hosted verification or CI result is implied. No adoption, savings, performance or live-transaction metrics are claimed.
+
+#### What the implementation demonstrates
+
+Payment authorization needs deterministic checks on both sides of buyer approval, not just a plausible model response. Provider responses must be validated and unknown payment outcomes must remain unknown until reconciled. Sample analytics are useful only when they cannot be mistaken for real captured payments.
+
+#### What's next
+
+Hosted Sandbox smoke, license confirmation, a public recording and clean-clone verification are release gates, not completed milestones. Future work could add team approval chains and multi-currency after strengthening live-provider coverage. Production payments and merchant fulfilment are outside this Sandbox project's scope.
 
 ### 4.3 "Tools" field (required)
 
 | Tool | Type | How it is used |
 |---|---|---|
-| `<LLM provider + model>` | AI model | Turns the buyer's request into a schema-validated draft mandate (structured JSON output). It never sees product data, holds no PayPal tools, and cannot approve or pay. |
-| `<same or other model>` via AG Studio Agent Framework | AI agent | Answers governance questions ("why were offers blocked this week?") by building dashboard widgets from the session's audit data. Read-only. |
-| PayPal MCP Server (Sandbox) | Payments tools (MCP) | `create_order` and `get_order`, called only by IntentLock's server after policy + human approval; every call is in the audit log |
+| Google Gemini via `@google/genai` | AI model | Structured JSON mandate draft, strict Zod validation and deterministic fallback. Configured model target: `AI_MODEL=gemini-3.8-flash`; verify access and record the actual deployed model before submission. The parser sees only the request and cannot approve or pay. |
+| Google Gemini + AG Studio Agent Framework | AI agent | Governance Analyst edits dashboard widgets from session-scoped audit analytics. Payment-read-only: dashboard edits are allowed, payment tools are absent. Optional, live verification pending. |
+| PayPal MCP Server (Sandbox) | Payments tools (MCP) | Server-only `create_order` and `get_order`, allow-listed; short-lived access token, no client secret in the child environment. Create/capture require policy and human approval; reconciliation may read an existing order. Purchase-operation traces are audited. |
 | PayPal Orders v2 + JS SDK (Sandbox) | Payments | Buyer approval, server-side capture with idempotency key, fallback order read |
 | Channel3 Search API | Product data | Live product offers for the policy engine |
 | AG Grid / AG Studio | UI | Audit ledger and governance dashboard |
 | Render | Hosting | Web service + Postgres |
+| Postman | API tooling | Happy-path, unexpected-total tamper and drift collection with response assertions |
 | GitHub Copilot | Dev tool | Coding assistant (named for transparency) |
 
 ## 5. Judge access (goes in README and Devpost "testing instructions")
 
-README section title: **"Judge Quickstart & Test Scenarios"** (AC-8.3).
+README section title: **"Judge Quickstart & Test Scenarios"** (AC-8.3). The hosted URL and dedicated judge sandbox buyer credentials are intentionally blank until deployment and private account setup are complete; do not publish account secrets in the repository.
 
-- **Hosted demo:** URL, no login. Sessions are anonymous and isolated.
+- **Hosted demo:** pending verified deployment. Sessions are anonymous and isolated; add the URL only after live smoke passes.
 - **PayPal sandbox buyer:** email + password of a **dedicated sandbox personal account** made only for judges. Never share the sandbox **business** account or the REST app secret.
 - **Optional card path:** PayPal sandbox card generator link, for judges who can't log in.
-- **1-click scenario presets (AC-8.3):** Happy Path Capture, Blocked Offer, Pre-Capture Drift Rejection — each with its expected result.
+- **1-click scenario presets (AC-8.3):** **Allowed purchase**, **Over-budget offer**, **Pre-capture drift** — actual UI labels, with the expected-results table in the root README.
 - **Cold start:** "Load Sample Procurement History" fills the ledger and AG Studio at once (AC-6.5); "Simulate Post-Approval Drift" shows the gate blocking capture (AC-5.6). Target: both verified in under 3 minutes.
-- **Run locally:** `docker compose up` or `npm run dev`. Judges create their own free PayPal sandbox app (≈ 5 min, link to steps), Channel3 key (free; promo `PAYPAL-HACKATHON-2026` gives 20 000 credits) and an AI key. Fixture mode (`PRODUCT_SOURCE=fixture`) needs no Channel3 key. State clearly that the LLM is required for the AI features.
+- **Run locally:** `npm run dev` with a hosted Postgres `DATABASE_URL`; no Docker path is required. Judges create their own PayPal Sandbox app and, when enabled, AI/Channel3 keys. Fixture catalog plus `AI_PROVIDER=rule` mode need neither Channel3 nor Gemini credentials. Gemini is the structured-output intent parser when `AI_PROVIDER=gemini`; it is not allowed to approve or capture.
 - **AG Studio key:** shared only in the private Devpost testing notes for local runs (research D4); the hosted demo already has it.
-- **Known-good scenario:** "Buy 2 ergonomic office chairs, max $400 total, only from acme-office.example or deskworks.example, no subscriptions."
+- **Fixture scenario:** "Buy 1 ergonomic desk chair for no more than $120 from northstar-office.example." The allowed fixture chair is $89; live-provider results are not promised to match fixtures.
 - **Expected results table:** which offer is allowed or blocked, and why. Judges can check behavior quickly.
 
 ## 6. Video production checklist
@@ -115,20 +136,30 @@ README section title: **"Judge Quickstart & Test Scenarios"** (AC-8.3).
 - [ ] No copyrighted music; no third-party logos other than the sponsor tools actually used.
 - [ ] Burned-in or YouTube captions (accessibility + clarity for judges).
 - [ ] Upload as **Public** (not unlisted); confirm it plays while logged out.
-- [ ] **Backup cut recorded at G2 (3 Nov)** so a late regression can't leave us without a video.
+- [ ] Record a backup cut; no earlier recording is claimed. Use the exact **2:50** click script in [plan.md §7](plan.md#7-demo-video-script-under-3-minutes).
 
 ## 7. Judging-period runbook (1–15 Dec)
 
 | Item | Action |
 |---|---|
-| Hosting | Render web service on a **starter** (paid) instance from the first hosted deploy (free tier sleeps after 15 min idle and takes ~1 min to wake) — paid with the hackathon's $50 Render credit. |
-| Database | **Paid** Render Postgres from the start. Free Postgres **expires 30 days after creation** — a DB created on 3 Nov would expire on 3 Dec, in the middle of judging. |
-| AG Studio license | AG Grid offers a **45-day trial**. Activate it on **1 Nov** so it covers 15 Dec; note the expiry date in the README. |
-| Uptime | External uptime monitor on `/api/health` every 5 min, with alerts to two team members. |
+| Hosting | Render free web service with a scheduled GitHub Actions keep-alive ping every 10 minutes (`RENDER_APP_URL` repository variable). Free services may still sleep or change behavior; verify health and cold-start timing before judging. |
+| Database | Free Render Postgres may expire 30 days after creation. Record its creation date; for an early-November database, recreate around **30 Nov**, apply `npm run db:migrate`, update `DATABASE_URL`, and re-seed sample history using **Load Sample Procurement History**. Verify `/api/health`, `/api/audit/verify`, and the happy path. |
+| AG Studio license | Commercial product with a 45-day trial. Record actual activation, expiry and permitted deployment scope; no 1 Nov activation is assumed. Verify coverage through 15 Dec with the issuer. |
+| Uptime | GitHub Actions pings `/api/health` every 10 min when `RENDER_APP_URL` is configured; add an external monitor and alerts before judging. |
 | Cost control | Set a hard spend limit / budget alert on the AI provider; keep per-session rate limits on. |
 | Keys | Don't rotate keys or change sandbox passwords until after 21 Dec. |
 | Code freeze | Tag `v1.0.0-submission`; Devpost links to that tag. After the deadline, keep `main` at the tag; do further work on a branch. Rules forbid changing the submission after the deadline. |
 | Seed data | Daily check that the demo scenario still gives the expected results (Channel3 data can change → fixture mode switch documented). |
+
+### Free Postgres replacement (target ~30 Nov; actual expiry takes precedence)
+
+1. Record the current DB creation/expiry and replacement owner privately. Set a calendar reminder before expiry; this file does not create one.
+2. Before expiry, preserve required old receipts and use Render's supported export/backup path if available. Do not export credentials, buyer data or connection strings into git. Replacement without restore destroys old session/purchase history.
+3. Create a new free Postgres instance in the web service region; confirm its actual expiry covers 15 Dec. Put its hosted URL in private local `.env`, then run `npm run db:migrate`. Verify migration success before switching traffic.
+4. Update the service's secret `DATABASE_URL` in Render and redeploy. The free-service startup command migrates before listening. Confirm `/api/health`, including database and MCP status; abort the cutover if dependencies are down.
+5. In a fresh private browser session, enable demo controls and click **Load Sample Procurement History**. Seed is per session, so judges use this button in their own session; an operator seed does not populate all judges' history.
+6. In **Audit ledger → Verify Audit Chain**, expect `INTACT` for the **new** session; never present it as the old chain. Repeat hosted happy-path capture and drift block from test-plan §6 and verify the Sandbox transaction.
+7. Check `RENDER_APP_URL`, manually run the keepalive workflow, verify later scheduled pings, and re-check free-instance hours. Schedules may delay or disable; provide external alerts and manual coverage. Remove the old DB only after evidence preservation and successful cutover.
 
 ## 8. Third-party license register (`THIRD_PARTY_NOTICES.md`)
 
@@ -139,7 +170,7 @@ README section title: **"Judge Quickstart & Test Scenarios"** (AC-8.3).
 | AG Grid Community | MIT | Ledger |
 | AG Studio | Commercial **trial** license | Key injected at build time from `VITE_AG_STUDIO_KEY`, not committed. Without a key the app still works, but AG Studio shows a trial watermark. Mention this in the README. |
 | LLM provider | Provider API terms | No user PII sent |
-| npm dependencies | Generated list (`license-checker --summary`) | Fail CI on GPL/AGPL in runtime deps |
+| npm dependencies | Locked manifests plus installed license texts | Direct runtime licenses recorded in notices; no completed transitive license audit or CI license-policy enforcement is claimed |
 
 ## 9. Community and support
 

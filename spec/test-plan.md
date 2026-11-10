@@ -13,6 +13,14 @@
 
 Coverage is a floor, not a goal; the scenario list in §4 is the real acceptance bar.
 
+Stage 5 automation currently targets the requested subset: E2E-01, 02, 05, 10, 12–17
+(nine Playwright tests; some cover two IDs). Browser SDK approval is intercepted,
+Sandbox REST uses MSW, MCP uses a stdio stub and Studio turns are mocked. API
+integration uses in-process PGlite, not a hosted Postgres service. This does not
+claim the remaining E2E IDs, real Sandbox checkout or hosted G2/G3/G4 verification.
+SEC-04 also has a built-in Node regression test; its browser-visible AG Studio
+license exception is documented, not a permission to expose server credentials.
+
 ## 2. Unit tests
 
 | ID | Target | Cases |

@@ -1,4 +1,9 @@
-import { clientToolRunner, createAiHarness, type AgAiAgentRun, type AgAiHarnessSetup } from 'ag-studio';
+import {
+  clientToolRunner,
+  createAiHarness,
+  type AgAiAgentRun,
+  type AgAiHarnessSetup,
+} from 'ag-studio';
 import { ErrorEnvelopeSchema, STUDIO_TOOL_NAMES, StudioEventSchema } from '@intentlock/shared';
 
 const allowed = new Set<string>(STUDIO_TOOL_NAMES);
@@ -6,10 +11,13 @@ const allowed = new Set<string>(STUDIO_TOOL_NAMES);
 export const runStudioTurn: AgAiAgentRun = async function* (input, ctx) {
   const tools = input.tools.filter((t) => allowed.has(t.name) && (!t.kind || t.kind === 'client'));
   const response = await fetch('/api/studio-agent/turn', {
-    method: 'POST', credentials: 'same-origin', signal: ctx.signal,
+    method: 'POST',
+    credentials: 'same-origin',
+    signal: ctx.signal,
     headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
     body: JSON.stringify({
-      threadId: input.threadId, runId: input.runId,
+      threadId: input.threadId,
+      runId: input.runId,
       messages: [
         { id: 'dashboard-instructions', role: 'system', content: ctx.instructions() ?? '' },
         ...input.messages,
@@ -20,8 +28,11 @@ export const runStudioTurn: AgAiAgentRun = async function* (input, ctx) {
   if (!response.ok) {
     const body: unknown = await response.json();
     const parsed = ErrorEnvelopeSchema.safeParse(body);
-    throw new Error(parsed.success ? `${parsed.data.error.code}: ${parsed.data.error.message}`
-      : `Governance Analyst returned HTTP ${response.status}.`);
+    throw new Error(
+      parsed.success
+        ? `${parsed.data.error.code}: ${parsed.data.error.message}`
+        : `Governance Analyst returned HTTP ${response.status}.`,
+    );
   }
   if (!response.body) throw new Error('Governance Analyst returned no event stream.');
   const reader = response.body.getReader();
@@ -50,15 +61,30 @@ export const runStudioTurn: AgAiAgentRun = async function* (input, ctx) {
   }
 };
 
-export const governanceAi: AgAiHarnessSetup = ({ api }) => createAiHarness(api, ({ builtIn }) => ({
-  primary: 'lead',
-  agents: Object.values(builtIn).map((definition) => clientToolRunner({
-    ...definition, maxTurns: 8, run: runStudioTurn,
-    tools: (ctx, params) => (definition.tools?.(ctx, params) ?? []).filter((tool) => allowed.has(tool.name)),
-  })),
-  promptStarters: [
-    { label: 'Explain blocks', prompt: 'Why were offers blocked? Add a widget showing blocks by primary reason.' },
-    { label: 'Capture integrity', prompt: 'Show capture blocks by reason and explain the Mandate Integrity & MCP Gate.' },
-    { label: 'MCP outcomes', prompt: 'Add a widget comparing MCP outcomes, clearly separating sample data.' },
-  ],
-}));
+export const governanceAi: AgAiHarnessSetup = ({ api }) =>
+  createAiHarness(api, ({ builtIn }) => ({
+    primary: 'lead',
+    agents: Object.values(builtIn).map((definition) =>
+      clientToolRunner({
+        ...definition,
+        maxTurns: 8,
+        run: runStudioTurn,
+        tools: (ctx, params) =>
+          (definition.tools?.(ctx, params) ?? []).filter((tool) => allowed.has(tool.name)),
+      }),
+    ),
+    promptStarters: [
+      {
+        label: 'Explain blocks',
+        prompt: 'Why were offers blocked? Add a widget showing blocks by primary reason.',
+      },
+      {
+        label: 'Capture integrity',
+        prompt: 'Show capture blocks by reason and explain the Mandate Integrity & MCP Gate.',
+      },
+      {
+        label: 'MCP outcomes',
+        prompt: 'Add a widget comparing MCP outcomes, clearly separating sample data.',
+      },
+    ],
+  }));

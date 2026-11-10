@@ -20,7 +20,11 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "npm run test --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present && node --test scripts/*.test.mjs",
+    "e2e": "playwright test -c e2e/playwright.config.ts",
+    "openapi:generate": "tsx scripts/openapi.ts",
+    "openapi:check": "tsx scripts/openapi.ts --check",
+    "security:bundle": "node scripts/check-web-bundle-secrets.mjs",
     "db:migrate": "npm run db:migrate -w apps/api",
     "db:generate": "npm run db:generate -w apps/api"
   },
@@ -28,13 +32,18 @@
     "@paypal/agent-toolkit": "1.11.0"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.14.0",
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.65.0",
     "eslint": "^10.14.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-react-hooks": "^7.1.1",
     "globals": "^17.14.0",
+    "msw": "^3.0.4",
     "prettier": "^3.9.10",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.72.1"
+    "typescript-eslint": "^8.72.1",
+    "yaml": "^2.9.1",
+    "zod-openapi": "^6.0.2"
   }
 }

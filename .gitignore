@@ -3,6 +3,8 @@ dist/
 coverage/
 *.tsbuildinfo
 .vite/
+test-results/
+playwright-report/
 
 # secrets: never commit real env files
 .env

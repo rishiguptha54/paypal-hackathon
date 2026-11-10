@@ -58,21 +58,40 @@ export const api = {
   draft: (requestText: string) => request('POST', '/mandates', MandateSchema, { requestText }),
   confirm: (id: string, fields: MandateFields) =>
     request('POST', `/mandates/${id}/confirm`, MandateSchema, MandateFieldsSchema.parse(fields)),
-  search: (id: string) => request('POST', `/mandates/${id}/search`,
-    z.object({ source: OfferSourceSchema, offers: z.array(EvaluatedOfferSchema) })),
+  search: (id: string) =>
+    request(
+      'POST',
+      `/mandates/${id}/search`,
+      z.object({ source: OfferSourceSchema, offers: z.array(EvaluatedOfferSchema) }),
+    ),
   select: (mandateId: string, offerSnapshotId: string) =>
     request('POST', '/purchases', PurchaseSchema, { mandateId, offerSnapshotId }),
-  ledger: (cursor?: string) => request('GET',
-    `/audit?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`, LedgerPageSchema),
-  receipt: (kind: 'PURCHASE' | 'OFFER', id: string) => request('GET',
-    `/${kind === 'PURCHASE' ? 'purchases' : 'offers'}/${id}/receipt`, IntentReceiptSchema),
+  ledger: (cursor?: string) =>
+    request(
+      'GET',
+      `/audit?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
+      LedgerPageSchema,
+    ),
+  receipt: (kind: 'PURCHASE' | 'OFFER', id: string) =>
+    request(
+      'GET',
+      `/${kind === 'PURCHASE' ? 'purchases' : 'offers'}/${id}/receipt`,
+      IntentReceiptSchema,
+    ),
   verify: () => request('GET', '/audit/verify', AuditVerificationSchema),
   dataset: () => request('GET', '/analytics/dataset?days=90', AnalyticsDatasetSchema),
-  seed: () => request('POST', '/demo/seed',
-    z.object({ seeded: z.object({ mandates: z.number(), evaluations: z.number(), purchases: z.number() }) })),
+  seed: () =>
+    request(
+      'POST',
+      '/demo/seed',
+      z.object({
+        seeded: z.object({ mandates: z.number(), evaluations: z.number(), purchases: z.number() }),
+      }),
+    ),
   drift: (id: string, kind: DriftKind) =>
     request('POST', `/purchases/${id}/simulate-drift`, PurchaseSchema, { kind }),
-  tamper: (id: string) => request('POST', `/purchases/${id}/approve`, PurchaseSchema, { total: '1.00' }),
+  tamper: (id: string) =>
+    request('POST', `/purchases/${id}/approve`, PurchaseSchema, { total: '1.00' }),
   createTestPurchase: async (): Promise<Purchase> => {
     const fields = {
       productQuery: 'ergonomic desk chair',

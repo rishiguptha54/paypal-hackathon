@@ -24,7 +24,10 @@ export function rateLimit(limit: number, windowMs = 60_000) {
       }
     }
     if (bucket.count > limit) {
-      res.setHeader('Retry-After', Math.max(1, Math.ceil((bucket.startedAt + windowMs - now) / 1000)));
+      res.setHeader(
+        'Retry-After',
+        Math.max(1, Math.ceil((bucket.startedAt + windowMs - now) / 1000)),
+      );
       return next(new AppError(429, 'RATE_LIMITED', 'Too many requests. Please try again later.'));
     }
     next();

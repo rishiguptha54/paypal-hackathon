@@ -10,6 +10,7 @@ import type { IntentParser } from '../../src/adapters/intentParser/types';
 import { FixtureCatalogProvider } from '../../src/adapters/catalog/fixtureCatalogProvider';
 import { CatalogService } from '../../src/adapters/catalog/catalogService';
 import type { StudioGenerator } from '../../src/adapters/studio/gemini';
+import type { Logger } from '../../src/logger';
 
 export const TEST_ENV = {
   NODE_ENV: 'test',
@@ -23,6 +24,8 @@ export const TEST_ENV = {
 export async function buildTestApp(
   opts: {
     gateway?: (rest: PayPalRestClient, fake: FakePayPal) => PayPalOrderGateway;
+    paypalFetch?: (fake: FakePayPal) => typeof fetch;
+    logger?: Logger;
     env?: Record<string, string>;
     parser?: IntentParser;
     studioGenerator?: StudioGenerator;
@@ -32,13 +35,14 @@ export async function buildTestApp(
   const { db, close } = await createTestDb();
   const fake = new FakePayPal();
   const config = loadConfig({ ...TEST_ENV, ...opts.env } as NodeJS.ProcessEnv);
+  const logger = opts.logger ?? createLogger({ level: 'silent' });
   const rest = new PayPalRestClient({
     clientId: config.paypal.clientId,
     clientSecret: config.paypal.clientSecret,
-    fetch: fake.fetch,
+    fetch: opts.paypalFetch?.(fake) ?? fake.fetch,
+    logger,
   });
   const gateway = (opts.gateway ?? restOnlyGateway)(rest, fake);
-  const logger = createLogger({ level: 'silent' });
   const fixtures = new FixtureCatalogProvider();
   const catalog = new CatalogService(fixtures, fixtures, logger);
   const parser = opts.parser ?? new RuleBasedParser();

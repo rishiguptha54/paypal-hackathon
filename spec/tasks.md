@@ -10,7 +10,7 @@
 | T001 | Create public repo, MIT `LICENSE`, `.gitignore` (incl. `.env*` except `.env.example`), README skeleton | D | — | License shows in GitHub About |
 | T002 | npm workspaces: `apps/web`, `apps/api`, `packages/shared`; strict `tsconfig` base; ESLint + Prettier | D | T001 | `npm run typecheck` passes |
 | T003 | `apps/api`: Express 5 server, `config.ts` (Zod env, fails fast, `PAYPAL_ENV=sandbox` guard), pino with redaction, requestId, error envelope, helmet, JSON-only + 16 KB limit | B | T002 | UNIT-CFG-01, SEC-02, SEC-11, SEC-12 |
-| T004 | `docker-compose.yml` (Postgres 16 + api), Drizzle setup, first migration (`sessions`), `/api/health` with DB ping | D | T003 | Health 200 on two machines |
+| T004 | Hosted Postgres URL (no Docker), Drizzle setup, first migration (`sessions`), `/api/health` with DB ping | D | T003 | Health 200 on two machines |
 | T005 | Signed anonymous session middleware (`il_sid`) | B | T004 | Cookie flags asserted |
 | T006 | `apps/web`: Vite + React + TS shell, typed API client, `/api/config` fetch; Express serves built SPA in prod | C | T002 | Page loads from API origin |
 | T007 | GitHub Actions: install, typecheck, lint, unit, integration (Postgres service), gitleaks, `npm audit --omit=dev` | D | T004 | CI green |
@@ -97,14 +97,19 @@
 
 ## Delivery track (Day 1–6, then hardening 5–8 Nov)
 
+Final delivery decisions: Gemini adapter, native Node (no Docker), Render free
+service with ten-minute health pings and expiry-tracked free Postgres replacement.
+T073 live smoke/video and T074 P2 webhooks remain deferred; no hosted gates or
+submission are asserted by the local implementation.
+
 | ID | Task | Role | Depends | Verify |
 |---|---|---|---|---|
-| T070 | Multi-stage `Dockerfile` (non-root, includes the pinned PayPal MCP Server package), `render.yaml` (**starter** web service + paid Postgres via Render credit, pre-deploy migrate, health path, `VITE_AG_STUDIO_KEY` as build-time env) | D | T004 | Deploy succeeds; no cold start |
+| T070 | Native Node `render.yaml` (no Docker), free web service + hosted free Postgres URL, pinned MCP dependency, startup migration (free services have no pre-deploy hook), health path, build-time Studio license; 10-minute ping + DB replacement runbook | D | T004 | Hosted smoke pending; disclose free-tier cold-start/expiry risks |
 | T071 | Judge scenario presets content: the 3 presets (Happy Path, Blocked Offer, Pre-Capture Drift) + expected-outcome table shared by `/config` and README | D | T045 | E2E-17 |
-| T072 | Playwright suite E2E-01..17 in fixture mode with MSW PayPal mock + stub MCP; run in CI | D | T060–T066, T06A | **G2** (E2E-01..13, E2E-15), **G3** (all) |
+| T072 | Stage 5 mandatory Playwright scenarios E2E-01, 02, 05, 10, 12–17 with MSW Sandbox REST + intercepted SDK + stub MCP; CI | D | T060–T066, T06A | Nine browser tests cover these IDs; remaining E2E-03, 04, 06–09, 11 are not claimed |
 | T073 | Live smoke on hosted URL (test-plan §6), record evidence; **record the backup video cut** | D+A | T070, T072 | **G2** |
 | T074 | **P2 (US-9), only after G3 and P7 items are green:** webhook route (raw body), self-verification, cert host pin, dedupe, transitions; subscribe the 5 events in [research.md §2](research.md#2-paypal--paypal-mcp-server) | A | T052 | INT-14, INT-15, SEC-07 |
-| T075 | OpenAPI 3.1 generated from Zod (`zod-to-openapi`) + CI drift check; Postman collection export with happy-path, tamper and drift requests | D | T056, T057 | FR-19 (P1) |
+| T075 | OpenAPI 3.1 generated from shared Zod 4 (`zod-openapi`) + CI drift check; Postman collection with happy-path, tamper and drift requests | D | T056, T057 | FR-19 (P1) |
 | T076 | Security sweep: SEC-03, 04, 09, 10, 13 (fuzz) | D | T072 | SEC-* |
 
 ## Phase 8 — Release (9–11 Nov)
@@ -122,7 +127,7 @@
 | ID | Task | Role | Depends | Verify |
 |---|---|---|---|---|
 | T090 | Freeze `main` at the submission tag; further work on a branch only | Lead | T084 | Branch protection on |
-| T091 | Confirm Render starter web service + paid Postgres stay funded through 15 Dec (credits); uptime monitor with 2 alert recipients | D | T070 | No cold start; DB not expiring |
+| T091 | Verify free Render usage/health, 10-minute pings, free-DB expiry and ~30 Nov replacement; external uptime monitor + two alert recipients | D | T070 | Live smoke and actual expiry recorded; no guaranteed uptime |
 | T092 | Live smoke on 1 Dec and ~8 Dec; daily health glance until 15 Dec | D | T091 | Logged results |
 | T093 | After 21 Dec: rotate all keys and the judge sandbox password; downgrade paid plans | D | — | — |
 

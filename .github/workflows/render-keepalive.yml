@@ -1,0 +1,19 @@
+name: Render keepalive
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ping:
+    if: ${{ vars.RENDER_APP_URL != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Render health endpoint
+        env:
+          RENDER_APP_URL: ${{ vars.RENDER_APP_URL }}
+        run: curl --fail --silent --show-error --max-time 30 "${RENDER_APP_URL%/}/api/health"

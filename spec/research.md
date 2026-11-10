@@ -10,7 +10,7 @@
 | Must integrate PayPal developer platform (Sandbox) **and** an AI tool/model; PayPal must be **central**. | **PayPal MCP Server** mediation + **PayPal Orders v2** create → buyer approve → verified pre-capture gate is the spine of the product. |
 | Stage One is pass/fail on theme fit and use of required APIs. | P0 = PayPal Sandbox + PayPal MCP Server + AI working end-to-end before any P2 stretch items. |
 | Five equally weighted criteria: Technological Implementation, Design, Potential Impact, Innovation, Presentation. | Each criterion maps to an explicit artifact and demo checkpoint in [plan.md §6](plan.md#6-judging-criteria-coverage). |
-| Functional demo required; a static prototype does **not** qualify. Hosted URL **or** complete run instructions. | Ship both: warm Render URL + `docker compose up` / `npm run dev` local quickstart. |
+| Functional demo required; a static prototype does **not** qualify. Hosted URL **or** complete run instructions. | Native Node Render configuration plus `npm run dev` / `npm run dev:web` and hosted Postgres; no Docker. Live verification pending. |
 | Public repo with OSI license visible in the About section. | MIT `LICENSE` committed in Phase 0. |
 | Video under 3 min, public on YouTube, no unlicensed music/trademarks. | Script and timing breakdown in [plan.md §7](plan.md#7-demo-video-script-under-3-minutes). |
 | Must provide test credentials / sandbox logins needed to test. | Root `README.md` "Judge Quickstart" includes PayPal Sandbox buyer credentials and 1-click drift simulation presets. |
@@ -57,13 +57,13 @@
 | Fact | Source | Decision |
 |---|---|---|
 | Single Web Service can serve both the Node/TypeScript API and the compiled Vite SPA from the same origin (`0.0.0.0:$PORT`), eliminating CORS and cross-site cookie issues. | [Render Web Services](https://render.com/docs/web-services) | Deploy a unified single-service architecture (`render.yaml` Blueprint in repo root) backed by Render Managed PostgreSQL. |
-| Free web services spin down after 15 min idle (~60s cold start); free Postgres expires after 30 days. Render provides $50 in hackathon credits on the sponsor page. | [Render Free Tier](https://render.com/docs/free) & [Render Sponsor Page](https://paypalaihackathon.devpost.com/details/render) | Claim the $50 Render credit and run the production demo on a warm starter instance + persistent Postgres through **15 Dec 2026** so judges never hit a 60-second cold start (`NFR-11`). |
+| Free web services spin down after 15 min idle (~60s cold start); free Postgres expires after 30 days. | [Render Free Tier](https://render.com/docs/free) | Final decision: free native Node service, 10-minute health pings and expiry-tracked DB replacement around 30 Nov. This does not guarantee uptime; disclose limits and verify judging readiness. |
 
 ## 6. AI provider & Prompt-Injection Isolation
 
 | Consideration | Decision |
 |---|---|
-| Strict JSON schema adherence required for draft mandate extraction. | Implement `IntentParser` interface with an OpenAI-compatible Structured Outputs adapter (`response_format: json_schema`, configured via `AI_MODEL` / `AI_API_KEY`) plus a deterministic fallback parser so tests and offline demos never break. Re-validate all outputs with Zod `.strict()`. |
+| Strict JSON schema adherence required for draft mandate extraction. | `GeminiIntentParser` uses installed `@google/genai` structured JSON output (`responseMimeType`, `responseSchema`, `AI_MODEL` / `AI_API_KEY`) and a deterministic rule fallback. Re-validate external outputs with strict Zod. Live model availability must be checked before recording. |
 | Indirect prompt injection via malicious product titles/descriptions from web catalogs. | **Strict Air-Gap:** The LLM **only** processes the buyer's initial natural-language request to draft a mandate (`US-1`). Catalog offers (`US-3`), policy evaluation (`FR-07`), `mandateHash` calculation (`FR-08`), and **PayPal MCP Server** calls (`FR-10`/`FR-11`) are executed 100% by deterministic server code. Product text never enters an LLM prompt. |
 | Predictable latency & cost. | Exactly **one** LLM call per mandate draft (`US-1`), and optional user-triggered turns in the read-only AG Studio Governance Analyst (`US-7`). Zero LLM calls in the offer evaluation or PayPal checkout loop. |
 

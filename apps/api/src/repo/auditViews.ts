@@ -103,11 +103,21 @@ export class AuditRepository {
           .limit(query.limit + 1);
     const ids = purchaseRows.map(({ purchase }) => purchase.id);
     const rejectionTime = sql`date_trunc('milliseconds', ${auditEvents.createdAt})`;
-    const rejections = query.state || (query.decision && query.decision !== 'BLOCKED') || query.seeded === true
-      ? [] : await this.db.select().from(auditEvents).where(and(
-        eq(auditEvents.sessionId, sessionId), eq(auditEvents.type, 'REQUEST_REJECTED'),
-        boundary(rejectionTime, auditEvents.id),
-      )).orderBy(desc(rejectionTime), desc(auditEvents.id)).limit(query.limit + 1);
+    const rejections =
+      query.state || (query.decision && query.decision !== 'BLOCKED') || query.seeded === true
+        ? []
+        : await this.db
+            .select()
+            .from(auditEvents)
+            .where(
+              and(
+                eq(auditEvents.sessionId, sessionId),
+                eq(auditEvents.type, 'REQUEST_REJECTED'),
+                boundary(rejectionTime, auditEvents.id),
+              ),
+            )
+            .orderBy(desc(rejectionTime), desc(auditEvents.id))
+            .limit(query.limit + 1);
     const traces = ids.length
       ? await this.db
           .select()
@@ -122,10 +132,17 @@ export class AuditRepository {
       : [];
     const rows: LedgerRow[] = [
       ...rejections.map((event): LedgerRow => ({
-        id: event.id, time: event.createdAt.toISOString(), kind: 'REQUEST_REJECTED',
+        id: event.id,
+        time: event.createdAt.toISOString(),
+        kind: 'REQUEST_REJECTED',
         product: `Rejected request: ${String(event.payload['route'] ?? 'unknown route')}`,
-        merchant: null, source: 'none', decision: 'BLOCKED', reasonCodes: ['REQUEST_REJECTED'],
-        approvalHashStatus: 'NONE', mcpTraceStatus: 'NONE', seeded: false,
+        merchant: null,
+        source: 'none',
+        decision: 'BLOCKED',
+        reasonCodes: ['REQUEST_REJECTED'],
+        approvalHashStatus: 'NONE',
+        mcpTraceStatus: 'NONE',
+        seeded: false,
       })),
       ...purchaseRows.map(({ purchase: p, offer, evaluation }): LedgerRow => {
         const findings = p.blockReasons ?? FindingSchema.array().parse(evaluation.findings);

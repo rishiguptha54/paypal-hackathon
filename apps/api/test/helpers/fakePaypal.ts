@@ -69,6 +69,10 @@ export class FakePayPal {
         id: m[1],
         status: order.status,
         intent: 'CAPTURE',
+        payer: {
+          email_address: 'sandbox-buyer@example.invalid',
+          name: { given_name: 'PayerGivenSentinel', surname: 'PayerSurnameSentinel' },
+        },
         purchase_units: [
           {
             reference_id: 'default',
@@ -108,6 +112,10 @@ export class FakePayPal {
       return json(201, {
         id: m[1],
         status,
+        payer: {
+          email_address: 'sandbox-buyer@example.invalid',
+          name: { given_name: 'PayerGivenSentinel', surname: 'PayerSurnameSentinel' },
+        },
         purchase_units: [{ payments: { captures: [{ id: `CAP${m[1]}`, status }] } }],
       });
     }

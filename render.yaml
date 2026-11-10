@@ -2,12 +2,11 @@ services:
   - type: web
     name: intentlock
     runtime: node
-    plan: starter
+    plan: free
     region: oregon
     buildCommand: npm ci --include=dev && npm run build
-    # Migrations run before each deploy, never at request time.
-    preDeployCommand: npm run db:migrate
-    startCommand: node apps/api/dist/server.js
+    # Free services do not support pre-deploy commands; fail startup if migration fails.
+    startCommand: npm run db:migrate && node apps/api/dist/server.js
     healthCheckPath: /api/health
     autoDeploy: true
     envVars:
@@ -27,6 +26,8 @@ services:
         value: 900
       - key: POLICY_VERSION
         value: v1
+      - key: AI_MODEL
+        value: gemini-3.8-flash
       - key: STUDIO_AGENT_ENABLED
         value: false
       - key: DEMO_CONTROLS_ENABLED
@@ -39,4 +40,10 @@ services:
       - key: PAYPAL_CLIENT_ID
         sync: false
       - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: VITE_AG_STUDIO_KEY
+        sync: false
+      - key: AI_API_KEY
+        sync: false
+      - key: CHANNEL3_API_KEY
         sync: false

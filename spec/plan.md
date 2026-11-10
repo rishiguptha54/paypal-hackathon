@@ -17,7 +17,7 @@
 | **A — Payments** | PayPal MCP gateway, REST capture, pre-capture gate, idempotency, drift simulation, webhooks (P2) | `adapters/paypalMcp`, `adapters/paypal`, `services/CaptureGate`, `services/Demo` |
 | **B — Core & AI** | Policy, money, hash, state machine, intent parser, Channel3 adapter, audit chain, analytics + Studio agent proxy, demo seeder | `core/*`, `adapters/intentParser`, `adapters/productSource`, `services/{Audit,Analytics,StudioAgent}` |
 | **C — Frontend** | SPA flow, merchant preset chips, PayPal JS SDK v6 / react-paypal-js, AG Grid ledger, receipt, AG Studio Governance dashboard, demo controls, a11y | `apps/web/*` |
-| **D — Quality & Delivery** | CI, Docker, Render, E2E, README Judge Quickstart, Postman, video | `.github/`, `e2e/`, `render.yaml`, `README.md` |
+| **D — Quality & Delivery** | CI, native Node Render, E2E, README Judge Quickstart, Postman, video | `.github/`, `e2e/`, `render.yaml`, `README.md` |
 
 Rule: any change to `core/policy`, `CaptureGate`, `PayPalMcpGateway` or state transitions needs review by a second person.
 
@@ -29,7 +29,7 @@ gantt
   axisFormat  %d %b
   title IntentLock 6-day sprint + release
   section Pre-sprint
-  P0 Repo, CI, Docker, DB, health        :p0, 2026-10-26, 3d
+  P0 Repo, CI, hosted DB, health         :p0, 2026-10-26, 3d
   Admin - IP check, Devpost team, Discord, keys, credits :adm, 2026-10-26, 3d
   Spec baseline v1.1 locked              :milestone, sb, 2026-10-29, 0d
   section Payments (A)
@@ -51,7 +51,7 @@ gantt
   P6b AG Grid ledger, receipt, demo controls :p6b, 2026-11-02, 2d
   P6c Governance Studio + agent          :p6c, 2026-11-03, 2d
   section Delivery (D)
-  Render starter + Postgres pipeline     :d1, 2026-10-30, 2d
+  Render free + Postgres pipeline        :d1, 2026-10-30, 2d
   E2E suite                              :d2, 2026-11-01, 4d
   G2 Demo-able + backup video            :milestone, g2, 2026-11-03, 0d
   G3 Sprint exit - all P0 hosted         :milestone, g3, 2026-11-04, 0d
@@ -67,7 +67,7 @@ gantt
 
 | Dates | Phase | Exit criteria |
 |---|---|---|
-| Mon 26 – Wed 28 Oct | **P0 Foundation (pre-sprint)** | Clean clone → `npm ci && docker compose up` → `/api/health` 200 on two machines; CI green; MIT license; `.env.example`; Copilot instructions |
+| Mon 26 – Wed 28 Oct | **P0 Foundation (pre-sprint)** | Clean clone → npm setup with hosted Postgres → `/api/health` 200 on two machines; no Docker; CI green; MIT license; `.env.example`; Copilot instructions |
 | Mon 26 – Wed 28 Oct | **Admin (pre-sprint)** | Employer/IP check done by every member; all members registered on Devpost and in one team; PayPal Discord joined; Channel3 key + promo applied; Render $50 credit claimed; AI provider chosen with a spend cap ([submission.md](submission.md)) |
 | Thu 29 Oct | **Day 0 — Baseline** | Spec v1.1 locked; research decisions D1–D5 accepted; tasks assigned |
 | Day 1–2 · Fri 30 – Sat 31 Oct | **P1 PayPal MCP slice** | Fixed $1.00 purchase: MCP `create_order` → sandbox buyer approves → MCP `get_order` → REST capture → stored `COMPLETED`; cancel path works |
@@ -82,7 +82,7 @@ gantt
 | Mon 9 – Tue 10 Nov | **P8 Release** | Feature freeze; full test pass; README Judge Quickstart; G4 |
 | Wed 11 Nov | **Submit** | Video uploaded (public, < 3 min); Devpost form complete; submitted |
 | Thu 12 Nov | **Buffer** | Only fixes to submission text; no code changes after 06:00 PT |
-| 25 – 30 Nov | **Judging prep** | Confirm Render starter + paid Postgres are funded through 15 Dec; uptime monitor on; AG Studio trial expiry ≥ 16 Dec confirmed; live smoke repeated |
+| 25 – 30 Nov | **Judging prep** | Check Render free-service health and database expiry; recreate/migrate/re-seed if needed; 10-minute health ping configured; AG Studio trial expiry confirmed; live smoke repeated |
 | 1 – 15 Dec | **Judging** | Demo live; daily health check; live smoke on 1 Dec and ~8 Dec; `main` frozen at the submission tag |
 
 ## 4. Quality gates (go / no-go)
@@ -103,13 +103,13 @@ gantt
 | R2 | Channel3 key not granted or schema differs | Med | Med | Integration fails on Day 3 | Fixture provider (already P0, automatic fallback) with visible "Fixture Catalog" badge; list Channel3 only if actually integrated |
 | R3 | LLM output unreliable | Med | Med | UNIT-PARSE failures in live smoke | Tighter JSON schema, few-shot examples, rule parser fills/validates; user confirms anyway |
 | R4 | AI provider key/budget unavailable | Low | **Critical** (rules require AI) | No key by Day 0 (29 Oct) | Pick any provider with free tier; adapter makes swap ≤ 1 h |
-| R5 | Render cold starts or DB expiry during judging (1–15 Dec) | Med | High | Free-tier plan still in use | Starter web service + paid Postgres from the first hosted deploy (Render credit); keep-alive health ping; local run path documented |
+| R5 | Render free service sleeps or DB expires during judging (1–15 Dec) | High | High | Free-tier plan in use | GitHub Actions health ping every 10 min; recreate free Postgres before its expiry, migrate, re-seed and verify; disclose free-tier limits |
 | R6 | Scope creep (Bryntum, Workflows, extra sponsors) | High | High | New ideas after G1 | Scope fence in [README.md](README.md); changes require editing [spec.md](spec.md) |
 | R7 | AG Grid React version mismatch | Low | Low | Install warnings | Pin `ag-grid-react` = `ag-grid-community` version |
 | R8 | Video over 3 min or unclear | Med | High | First cut > 2:50 | Script below; record segments; rehearse twice |
 | R9 | Secrets leaked in demo video/screenshots | Low | High | — | Use sandbox-only accounts; hide devtools env; gitleaks + manual frame review |
 | R10 | AG Studio learning curve / trial access | Med | Med (sponsor prize only) | No themed dashboard by Day 5 (3 Nov) | Start from the official PayPal + AG Studio boilerplate; demo seeder gives it data from minute one; ask in Discord early; fallback sponsor pitch Channel3 |
-| R11 | Hosted demo dies during judging (free DB expiry after 30 days, sleep after 15 min, AG Studio trial expiry) | **High** if ignored | **Critical** | — | Starter + paid Postgres from first deploy; trial activated 1 Nov; uptime monitor; [submission.md §7](submission.md#7-judging-period-runbook-115-dec) |
+| R11 | Hosted demo dies during judging (free DB expiry, free-service sleep, AG Studio trial expiry) | **High** if ignored | **Critical** | — | 10-minute health ping; recreate/migrate/re-seed free DB around 30 Nov when needed; verify service and disclose free-tier risks; [submission.md §7](submission.md#7-judging-period-runbook-115-dec) |
 | R12 | Employer IP / eligibility conflict | Low–Med | **Critical** (disqualification) | — | IP check before Day 0; personal devices/accounts only |
 | R13 | JS SDK v6 is newer; fewer examples | Med | Med | G0 at risk | Same server hooks work with `@paypal/react-paypal-js` buttons (ADR-012) |
 | R14 | Judges score only from text/video (no hands-on) | High | High | — | Video and gallery must stand alone; README maps each criterion to evidence |
@@ -131,16 +131,24 @@ Targeted categories: **Best Use of PayPal + AI**, **Best Use of Agentic Commerce
 
 ## 7. Demo video script (under 3 minutes)
 
-| Time | Shot | Line (paraphrase) |
+**Length: 2:50 (170 seconds).** This is a recording script, not evidence that a video exists. Record only after hosted live smoke, Gemini and AG Studio license checks pass. Use the real Sandbox SDK, never the offline E2E harness. Label the whole recording **PayPal Sandbox - test money**.
+
+**Prepare off-camera:** configure fixture catalog, live Gemini intent/Studio, demo controls and licensed Studio. Sign in to the dedicated Sandbox buyer privately; hide credentials, bookmarks and notifications. In a second same-origin tab prepare a **Pre-capture drift** purchase at **Approval**, without clicking approval yet. Keep the main tab on **Request**. Rehearse buyer-popup duration; trim dead time transparently, never fabricate a capture.
+
+| Time | Exact click path / screen | Narration |
 |---|---|---|
-| 0:00–0:15 | Title + problem | "An AI agent can find a chair. It shouldn't decide what you pay for it." |
-| 0:15–0:35 | Type request (scenario preset); AI drafts mandate; merchant chips | "The AI proposes rules. I confirm them — nothing is guessed." |
-| 0:35–1:05 | Offers: allowed / over-budget / subscription / unknown | "Code, not the model, decides. Every block has a reason code." |
-| 1:05–1:20 | Approve exact order | "I approve one exact order — the server locks it with a hash." |
-| 1:20–1:50 | IntentLock calls PayPal MCP `create_order` → Sandbox popup → gate reads live order via `get_order` → capture → verified status | "The AI never holds PayPal's tools. IntentLock calls them, then re-checks PayPal's own order before capture." |
-| 1:50–2:20 | Second purchase: toggle "Simulate Post-Approval Drift" → capture blocked `DRIFT_AMOUNT_MISMATCH`; ledger row appears | "If anything changes after I approve, the money doesn't move — and the block is logged." |
-| 2:20–2:45 | Governance Studio: themed dashboard → ask agent "why were offers blocked this week?" → widget appears → Mandate Integrity & MCP Gate widget INTACT → open one Intent Receipt | "AI explains your spend, but it can never move money. Every decision is tamper-evident." |
-| 2:45–2:58 | Close | "IntentLock doesn't give agents more power. It makes every purchase prove it stayed inside your intent." Sandbox disclaimer on screen. |
+| 0:00–0:12 | Main tab **Procurement → Request**, title and Sandbox label | "An AI agent can find a chair. It shouldn't decide what you pay for it. IntentLock is a buyer-side policy gate." |
+| 0:12–0:32 | **Allowed purchase → Draft mandate**; show parser `gemini`, quantity 1, max $120, approved domain and no subscriptions | "Gemini drafts my constraints. I inspect the budget, merchant and subscription rule before confirming." |
+| 0:32–0:52 | **Confirm mandate and find offers**; show ALLOWED chair and scroll to `OVER_BUDGET`, `RECURRING_NOT_ALLOWED`, `PRICE_UNKNOWN` | "These labelled fixtures exercise allow, block and review. Deterministic code makes each decision, not the model." |
+| 0:52–1:05 | Allowed chair **Select offer → Approve this exact purchase** | "The server calculates 89 dollars. I approve this exact purchase, bound to a mandate hash." |
+| 1:05–1:35 | **PayPal** button → Sandbox buyer popup → approve payment using the actual popup's approval button; return to **Captured - verified with PayPal (Sandbox)** | "The server calls PayPal MCP, then verifies PayPal's live order before REST capture. This is Sandbox test money, not a merchant purchase." |
+| 1:35–1:47 | **View Intent Receipt**; show `create_order`, `get_order`, final capture evidence → **Close receipt** | "The receipt records the MCP trace, final payment evidence and tamper-evident chain." |
+| 1:47–2:10 | Switch to prepared **Pre-capture drift** tab → **Approve this exact purchase**; show checked **Simulate Post-Approval Drift at the next capture**, **Drift scenario: Price hike** → **PayPal** → buyer approval | "This second request simulates post-approval drift. The live gate refuses capture: BLOCKED_AT_CAPTURE, DRIFT_AMOUNT_MISMATCH." |
+| 2:10–2:22 | **Audit ledger → Quick filter: BLOCKED_AT_CAPTURE** → select row → show simulated badge → **Close receipt → Verify Audit Chain** | "The block has a receipt. The audit chain verifies INTACT; a blocked order is not a captured payment." |
+| 2:22–2:43 | **Load Sample Procurement History → Governance Studio**; show sample disclosure, Mandate Integrity & MCP Gate → **Message input**: `Explain blocks and add a widget by primary reason.` → **Send message**; show actual new widget | "Sample history fills this session's dashboard without payments. The Governance Analyst can edit dashboard widgets, but it has no payment tools." |
+| 2:43–2:50 | Hold app with Sandbox label and project URL | "AI proposes. Code enforces. You approve. Every purchase must stay inside your intent." |
+
+PayPal's hosted popup labels can vary by locale/account. During rehearsal record its actual approval-button label in the recorder's private shot notes; do not invent a fixed label or show the login. If real upstream response time exceeds the slot, re-record or shorten narration while keeping the final cut at 2:50. If Gemini falls back to `rule` or the agent fails, stop and resolve it rather than claiming live AI evidence.
 
 ## 8. Definition of Done (per task)
 
@@ -158,7 +166,7 @@ The full compliance matrix, Devpost text plan, Judge Quickstart and video checkl
 - [ ] Every row of the [compliance matrix](submission.md#2-compliance-matrix-all-must-be--before-submitting) is ✅.
 - [ ] Public GitHub repo; MIT license visible in About.
 - [ ] README: problem, features, architecture diagram, setup (≤ 5 commands), env vars, **Judge Quickstart & Test Scenarios** (hosted URL, sandbox buyer login, 3 scenario presets, drift toggle, sample-history seeder), limitations, sponsor tools used and how.
-- [ ] Hosted URL live and warm on a starter instance; paid DB covers 1–15 Dec judging.
+- [ ] Hosted URL deployed and smoke-tested; free-tier availability and database expiry plan disclosed.
 - [ ] Video public on YouTube, < 3:00, no copyrighted music, sandbox labelled.
 - [ ] Devpost text explains how PayPal is central and which AI is used.
 - [ ] CI green on the submitted commit; tag `v1.0.0-submission`.

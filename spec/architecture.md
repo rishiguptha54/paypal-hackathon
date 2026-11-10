@@ -154,11 +154,9 @@ intentlock/
 │  └─ shared/src/{schemas,types,reasonCodes}.ts
 ├─ e2e/                         # Playwright
 ├─ spec/                        # this folder
-├─ docs/openapi.yaml            # generated from zod (zod-to-openapi)
-├─ postman/intentlock.postman_collection.json
-├─ docker-compose.yml           # postgres + api (dev)
-├─ Dockerfile                   # multi-stage, non-root
-├─ render.yaml                  # Render blueprint: web service + postgres
+├─ docs/openapi.yaml            # generated from shared Zod (zod-openapi)
+├─ postman/IntentLock.postman_collection.json
+├─ render.yaml                  # native Node free web service; hosted Postgres URL
 ├─ .github/{copilot-instructions.md,workflows/ci.yml,prompts/}
 ├─ .env.example
 └─ LICENSE (MIT)
@@ -396,30 +394,30 @@ Validated by Zod at boot; the process exits if invalid. Full list in `.env.examp
 | `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`, `PAYPAL_ENV=sandbox` | Boot fails if `PAYPAL_ENV` ≠ `sandbox` (hackathon guard) |
 | `PAYPAL_MCP_COMMAND` | Command that launches the official PayPal MCP Server over stdio (pinned package version, sandbox environment). The child process receives only a short-lived sandbox access token from the server, never the client secret |
 | `PAYPAL_WEBHOOK_ID` | P2 (US-9) |
-| `AI_PROVIDER=openai\|rule`, `AI_API_KEY`, `AI_MODEL` | `rule` needs no key (offline/demo fallback) |
+| `AI_PROVIDER=gemini\|rule`, `AI_API_KEY`, `AI_MODEL` | Google GenAI structured-output adapter; `rule` needs no key (offline/demo fallback) |
 | `PRODUCT_SOURCE=channel3\|fixture`, `CHANNEL3_API_KEY` | Channel3 failures fall back to fixtures automatically; the source badge shows which one served the results |
 | `APPROVAL_TTL_SECONDS=900`, `POLICY_VERSION` | |
 | `VITE_AG_STUDIO_KEY` | AG Studio trial key, injected **at build time** from `.env` (git-ignored) or Render env vars; never committed (research D4). If missing, AG Studio shows its trial watermark. |
 | `STUDIO_AGENT_ENABLED=true\|false` | Lets us switch the agent off if cost or abuse becomes a problem during judging |
 | `DEMO_CONTROLS_ENABLED=true\|false` | Enables drift simulation and the sample-history seeder (§6.5) |
 
-`PAYPAL_CLIENT_ID` is the only value also exposed to the browser (it is public by design); it is served via `GET /api/config`, not baked into the bundle.
+`PAYPAL_CLIENT_ID` is served publicly via `GET /api/config`. `VITE_AG_STUDIO_KEY` is a browser-visible build-time license, not a server/API credential; confirm license scope before deployment. Server secrets never belong in Vite variables.
 
 ## 13. Deployment
 
 ```mermaid
 flowchart LR
-  GH[GitHub main] -- push --> CI[GitHub Actions:<br/>typecheck, lint, unit, integration w/ postgres,<br/>e2e fixture mode, secret scan, npm audit]
+  GH[GitHub main] -- push --> CI[GitHub Actions:<br/>typecheck, lint, unit, integration with PGlite,<br/>e2e fixture mode, secret scan, npm audit]
   CI -- green --> R[Render auto-deploy]
-  R --> WS[Web Service: Docker image,<br/>pre-deploy: migrate]
+  R --> WS[Free native Node web service,<br/>startup: migrate then listen]
   WS --> PG[(Render Postgres)]
 ```
 
-- Multi-stage `Dockerfile`: build SPA + API → slim runtime, `USER node`, `NODE_ENV=production`.
-- Migrations run as Render pre-deploy command, never at request time.
+- No Docker path. Render installs with `npm ci --include=dev` and builds the SPA + API using the pinned PayPal MCP package.
+- Free services do not support pre-deploy hooks. The start command migrates and only starts the server on success, never at request time ([Render deploy commands](https://render.com/docs/deploys#pre-deploy-command)).
 - Health check path `/api/health` (checks DB with `SELECT 1` and adapter readiness: PayPal OAuth, MCP child process, catalog source, AI parser). Returns only status values, never URLs, keys or error text.
-- Local: `docker compose up` (or `npm run dev` against a local Postgres) starts the stack with fixture product source and rule-based parser — works with **no external keys** except PayPal sandbox.
-- Plans: the hosted demo runs on a warm **starter** web service + paid Render Postgres funded by the hackathon's $50 Render credit, from the first hosted deploy (sprint exit, 04 Nov) through 15 Dec. Free Postgres expires 30 days after creation and a free web service sleeps after 15 min idle; neither is acceptable during judging (1–15 Dec).
+- Local: `npm run dev` plus `npm run dev:web`, using a hosted Postgres URL, fixture catalog and rule parser; only PayPal Sandbox credentials are needed in this mode.
+- Final plan: Render free web service and free hosted Postgres. GitHub Actions pings health every 10 minutes, but delayed schedules, 15-minute idle sleep and monthly usage limits remain risks, not an uptime guarantee. Free Postgres expires 30 days after creation; record actual expiry and follow [submission.md §7](submission.md#7-judging-period-runbook-115-dec) to recreate/migrate/re-seed around 30 Nov. Hosted operation has not been verified.
 
 ## 14. Observability
 

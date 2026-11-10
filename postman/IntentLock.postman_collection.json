@@ -1,0 +1,313 @@
+{
+  "info": {
+    "_postman_id": "9e795f06-9639-4c03-9c73-fd572b9d5a82",
+    "name": "IntentLock API",
+    "description": "Fixture-mode API collection. Set baseUrl to the API origin and use the same cookie jar so the signed il_sid session stays consistent. The capture request requires a buyer-approved PayPal Sandbox order; approve through the web UI first. Run Tamper rejection and Drift rejection with their own fresh purchase flows.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "version": "1.0.0"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000/api" },
+    { "key": "mandateId", "value": "" },
+    { "key": "offerSnapshotId", "value": "" },
+    { "key": "purchaseId", "value": "" },
+    { "key": "mandateHash", "value": "" },
+    { "key": "paypalOrderId", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Setup and inspect offers",
+      "item": [
+        {
+          "name": "Create mandate",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"requestText\": \"Buy 1 ergonomic desk chair for no more than $120 from northstar-office.example.\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{baseUrl}}/mandates", "host": ["{{baseUrl}}"], "path": ["mandates"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('mandate created', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('mandateId', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Confirm mandate",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"productQuery\": \"ergonomic desk chair\",\n  \"quantity\": 1,\n  \"maxTotal\": \"120.00\",\n  \"currency\": \"USD\",\n  \"allowedMerchantDomains\": [\"northstar-office.example\"],\n  \"recurringAllowed\": false,\n  \"excludedTerms\": []\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/mandates/{{mandateId}}/confirm",
+              "host": ["{{baseUrl}}"],
+              "path": ["mandates", "{{mandateId}}", "confirm"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('mandate confirmed', () => pm.response.to.have.status(200));"]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Search offers",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{}", "options": { "raw": { "language": "json" } } },
+            "url": {
+              "raw": "{{baseUrl}}/mandates/{{mandateId}}/search",
+              "host": ["{{baseUrl}}"],
+              "path": ["mandates", "{{mandateId}}", "search"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('offers searched', () => pm.response.to.have.status(200));",
+                  "const offer = pm.response.json().offers.find((item) => item.decision === 'ALLOWED');",
+                  "pm.expect(offer, 'an ALLOWED offer is needed for purchase scenarios').to.exist;",
+                  "pm.collectionVariables.set('offerSnapshotId', offer.snapshotId);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Happy path (continue from setup)",
+      "item": [
+        {
+          "name": "Create purchase from allowed offer",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mandateId\": \"{{mandateId}}\",\n  \"offerSnapshotId\": \"{{offerSnapshotId}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/purchases",
+              "host": ["{{baseUrl}}"],
+              "path": ["purchases"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('purchase created', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('purchaseId', pm.response.json().id);",
+                  "pm.collectionVariables.set('mandateHash', pm.response.json().mandateHash);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Approve exact purchase",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mandateHash\": \"{{mandateHash}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/purchases/{{purchaseId}}/approve",
+              "host": ["{{baseUrl}}"],
+              "path": ["purchases", "{{purchaseId}}", "approve"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('purchase approved', () => pm.response.to.have.status(200));"]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create PayPal Sandbox order",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{}", "options": { "raw": { "language": "json" } } },
+            "url": {
+              "raw": "{{baseUrl}}/purchases/{{purchaseId}}/paypal/create-order",
+              "host": ["{{baseUrl}}"],
+              "path": ["purchases", "{{purchaseId}}", "paypal", "create-order"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('PayPal order created', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('paypalOrderId', pm.response.json().paypalOrderId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Capture after buyer approves in the web UI",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"paypalOrderId\": \"{{paypalOrderId}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/purchases/{{purchaseId}}/paypal/capture",
+              "host": ["{{baseUrl}}"],
+              "path": ["purchases", "{{purchaseId}}", "paypal", "capture"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('purchase captured', () => pm.response.to.have.status(200));",
+                  "pm.test('capture is verified', () => pm.expect(pm.response.json().state).to.eql('CAPTURED'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Tamper rejection (use a fresh setup)",
+      "item": [
+        {
+          "name": "Attempt to submit a client-controlled total",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mandateId\": \"{{mandateId}}\",\n  \"offerSnapshotId\": \"{{offerSnapshotId}}\",\n  \"total\": \"1.00\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/purchases",
+              "host": ["{{baseUrl}}"],
+              "path": ["purchases"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('unexpected total rejected', () => pm.response.to.have.status(400));",
+                  "pm.test('strict schema reason', () => pm.expect(pm.response.json().error.code).to.eql('UNEXPECTED_FIELD'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Drift rejection (use a fresh ORDER_CREATED purchase)",
+      "item": [
+        {
+          "name": "Simulate price drift",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"kind\": \"PRICE_HIKE\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/purchases/{{purchaseId}}/simulate-drift",
+              "host": ["{{baseUrl}}"],
+              "path": ["purchases", "{{purchaseId}}", "simulate-drift"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('drift applied only in demo mode', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Capture remains blocked after buyer approval",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"paypalOrderId\": \"{{paypalOrderId}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/purchases/{{purchaseId}}/paypal/capture",
+              "host": ["{{baseUrl}}"],
+              "path": ["purchases", "{{purchaseId}}", "paypal", "capture"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('capture blocked by drift', () => pm.response.to.have.status(409));",
+                  "pm.test('price drift reason returned', () => pm.expect(JSON.stringify(pm.response.json())).to.include('DRIFT_AMOUNT_MISMATCH'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
